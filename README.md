@@ -2,7 +2,9 @@
 
 A look for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s desktop app: Claude's warmth, Codex's neutrals, one blue accent. Not a reskin for its own sake — every surface was rebuilt around a single idea: **nothing decorative competes with the conversation.**
 
-![Clodex, light](docs/light-chat.png)
+![Clodex, dark](docs/dark-chat.png)
+
+<sub>Dark and light are both included — light is a pure-white canvas with a soft `#ececec` sidebar.</sub>
 
 ## What's in it
 
@@ -24,7 +26,11 @@ A look for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s deskto
 cp skin/clodex.yaml ~/.hermes/skins/
 ```
 
-Restart Hermes and pick **Clodex** in Appearance (or `hermes skin use clodex` for the CLI). This is user data, so it survives `hermes update` — but it only supplies the palette: surfaces, strokes, hover states, the sidebar/chat split and the dark tooltips. The layout below stays stock.
+Restart Hermes and pick **Clodex** in Appearance (or `hermes skin use clodex` for the CLI).
+
+This is user data, so it survives `hermes update` — but it only supplies the palette: surfaces, strokes, hover states, the sidebar/chat split and the dark tooltips. The layout below stays stock.
+
+![The theme picker with Clodex selected](docs/dark-themes.png)
 
 ### 2. Full look — patchset against the source (~5 minutes)
 
