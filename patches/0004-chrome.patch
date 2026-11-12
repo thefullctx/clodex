@@ -1,0 +1,1380 @@
+diff --git a/apps/desktop/index.html b/apps/desktop/index.html
+index 45d2cd5afc..2bf537b760 100644
+--- a/apps/desktop/index.html
++++ b/apps/desktop/index.html
+@@ -42,8 +42,117 @@
+         // localStorage unavailable — keep UA defaults.
+       }
+     </script>
++    <style>
++      /* BOOT SPLASH — the first frame the window ever paints. It lives in the
++         document, not in the React tree: the bundle takes a moment to arrive and
++         the window is shown as soon as a frame exists, so anything that waits
++         for mount is already too late. Dismissed by src/main.tsx on the first
++         painted frame after mount (see dismissBootSplash). */
++      #boot-splash {
++        align-items: center;
++        display: grid;
++        inset: 0;
++        justify-items: center;
++        pointer-events: none;
++        position: fixed;
++        transition: opacity 260ms ease;
++        z-index: 9999;
++      }
++
++      #boot-splash[data-gone] {
++        opacity: 0;
++      }
++
++      .boot-mark {
++        border-radius: 22%;
++        /* 64px to match the connecting overlay's BrandMark: the splash hands off
++           to the overlay, and a size jump between the two would read as a
++           flash rather than one screen. */
++        height: 64px;
++        overflow: hidden;
++        position: relative;
++        width: 64px;
++      }
++
++      .boot-mark img {
++        display: block;
++        height: 100%;
++        object-fit: contain;
++        width: 100%;
++      }
++
++      /* Same draw-on sweep as BrandMark's, on a faster cycle: a boot is 1-2s, so
++         the band has to cross while the splash is still on screen. */
++      .boot-mark::after {
++        animation: boot-sweep 1.5s cubic-bezier(0.4, 0, 0.2, 1) 60ms infinite;
++        background-image: linear-gradient(
++          105deg,
++          transparent 46%,
++          rgb(255 255 255 / 0.9) 49%,
++          color-mix(in srgb, #407bd9 55%, white) 51%,
++          transparent 54%
++        );
++        background-position: 180% 0;
++        background-repeat: no-repeat;
++        background-size: 250% 100%;
++        content: '';
++        inset: 0;
++        position: absolute;
++      }
++
++      @keyframes boot-sweep {
++        0% {
++          background-position: 180% 0;
++          opacity: 0;
++        }
++        8% {
++          opacity: 0.95;
++        }
++        58% {
++          background-position: -80% 0;
++          opacity: 0.95;
++        }
++        70%,
++        100% {
++          background-position: -80% 0;
++          opacity: 0;
++        }
++      }
++
++      @media (prefers-reduced-motion: reduce) {
++        .boot-mark::after {
++          animation: none;
++        }
++      }
++    </style>
+   </head>
+   <body>
++    <!-- Boot splash: painted on the first frame, removed once React has painted. -->
++    <div aria-hidden="true" id="boot-splash">
++      <span class="boot-mark"><img alt="" id="boot-mark-img" /></span>
++    </div>
++    <script>
++      // Same list as TRANSPARENT_WINDOWS (src/lib/transparent-windows.ts) and the
++      // background pre-paint above: a chromeless window must never get a splash.
++      try {
++        const kind = new URLSearchParams(window.location.search).get('win')
++        const splash = document.getElementById('boot-splash')
++
++        if (kind && ['hud', 'overlay', 'quick', 'wake'].indexOf(kind) !== -1) {
++          splash.remove()
++        } else {
++          const scheme =
++            localStorage.getItem('hermes-boot-color-scheme') ||
++            (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
++
++          document.getElementById('boot-mark-img').src =
++            scheme === 'dark' ? 'nous-girl-dark.png' : 'nous-girl.png'
++        }
++      } catch {
++        // No storage / no matchMedia: leave the splash without a mark rather than
++        // block the boot.
++      }
++    </script>
+     <div id="root" class="scrollbar-dt"></div>
+     <script type="module" src="/src/entry.ts"></script>
+   </body>
+diff --git a/apps/desktop/src/app/contrib/controller.tsx b/apps/desktop/src/app/contrib/controller.tsx
+index 16b1222fa9..af492fd273 100644
+--- a/apps/desktop/src/app/contrib/controller.tsx
++++ b/apps/desktop/src/app/contrib/controller.tsx
+@@ -1,11 +1,13 @@
+ import { useStore } from '@nanostores/react'
+ import { atom, computed } from 'nanostores'
+ import type { CSSProperties, ReactElement, PointerEvent as ReactPointerEvent } from 'react'
++import { useRef } from 'react'
+ 
+ import { SessionDraftTitle } from '@/app/chat/session-draft-title'
+ import { SessionStatusDot } from '@/app/chat/session-status-dot'
+ import { PALETTE_AREA, type PaletteContribution, paletteToggle } from '@/app/command-palette/contrib'
+ import { type StatusbarItem } from '@/app/shell/statusbar-controls'
++import { useSidebarColumnWidth } from '@/app/shell/use-sidebar-column-width'
+ import { InlinePreviewDirective } from '@/components/assistant-ui/inline-preview-directive'
+ import { IdleMount } from '@/components/idle-mount'
+ import { $layoutEditMode, toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
+@@ -782,6 +784,9 @@ registerPaneCloser('files', () =>
+ // ---------------------------------------------------------------------------
+ 
+ export function ContribController() {
++  const shellRef = useRef<HTMLDivElement>(null)
++
++  useSidebarColumnWidth(shellRef)
+   const sidebarOpen = useStore($sidebarOpen)
+   const statusbarVisible = useStore($statusbarVisible)
+ 
+@@ -821,6 +826,7 @@ export function ContribController() {
+             run in every window kind, so each shell mounts it. */}
+         <PluginPreviewConsentDialog />
+         <div
++          ref={shellRef}
+           className="flex h-full min-h-0 w-screen flex-col bg-(--ui-bg-chrome) text-(--ui-text-primary)"
+           // Window-glass hook: this div and the sidebar-wrapper above it are
+           // the app shell's two full-window opaque painters; the
+diff --git a/apps/desktop/src/app/overlays/overlay-split-layout.tsx b/apps/desktop/src/app/overlays/overlay-split-layout.tsx
+index 8ab6182cea..5677c594f6 100644
+--- a/apps/desktop/src/app/overlays/overlay-split-layout.tsx
++++ b/apps/desktop/src/app/overlays/overlay-split-layout.tsx
+@@ -126,7 +126,7 @@ export const OverlayNavItem = memo(function OverlayNavItem({
+       aria-current={current ? 'page' : undefined}
+       aria-pressed={pressed}
+       className={cn(
+-        'row-hover flex h-7 w-full shrink-0 items-center justify-start gap-2 rounded-md border px-2 text-left text-[length:var(--conversation-text-font-size)] font-normal transition-colors',
++        'row-hover flex h-7 w-full shrink-0 items-center justify-start gap-2 rounded-[10px] border px-2 text-left text-[length:var(--conversation-text-font-size)] font-normal transition-colors',
+         nested
+           ? active
+             ? current
+diff --git a/apps/desktop/src/app/overlays/overlay-view.tsx b/apps/desktop/src/app/overlays/overlay-view.tsx
+index e11276562d..2a7ec3f99f 100644
+--- a/apps/desktop/src/app/overlays/overlay-view.tsx
++++ b/apps/desktop/src/app/overlays/overlay-view.tsx
+@@ -105,7 +105,7 @@ export function OverlayView({
+       <div className="relative h-full min-h-0">
+         <div
+           className={cn(
+-            'relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-chat-surface-background) shadow-md',
++            'relative flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-(--ui-stroke-secondary) bg-(--ui-chat-surface-background) shadow-md',
+             rootClassName
+           )}
+           // Marks the card as a RAISED surface for window glass: while the field
+diff --git a/apps/desktop/src/app/overlays/panel.tsx b/apps/desktop/src/app/overlays/panel.tsx
+index 6030afa9ef..3f01e1b1c2 100644
+--- a/apps/desktop/src/app/overlays/panel.tsx
++++ b/apps/desktop/src/app/overlays/panel.tsx
+@@ -183,13 +183,13 @@ export function PanelListRow({
+   const row = (
+     <div
+       className={cn(
+-        'group/row row-hover relative flex h-7 w-full items-center rounded-md text-[0.78rem] hover:text-foreground',
++        'group/row row-hover relative flex h-7 w-full items-center rounded-[10px] text-[0.78rem] hover:text-foreground',
+         active ? 'bg-(--ui-row-active-background) text-foreground' : 'text-(--ui-text-secondary)'
+       )}
+       data-panel-row={rowKey}
+     >
+       <RowButton
+-        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md pl-2 pr-1 text-left"
++        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-[10px] pl-2 pr-1 text-left"
+         onClick={onSelect}
+       >
+         {lead ??
+diff --git a/apps/desktop/src/app/shell/approval-mode-menu.tsx b/apps/desktop/src/app/shell/approval-mode-menu.tsx
+index e0bdd15b50..a7c5a0788f 100644
+--- a/apps/desktop/src/app/shell/approval-mode-menu.tsx
++++ b/apps/desktop/src/app/shell/approval-mode-menu.tsx
+@@ -60,7 +60,10 @@ export function useApprovalModeStatusbarItem(
+   }, [gatewayState, profile, requestGateway, routeIdentity])
+ 
+   return {
+-    className: mode === 'off' ? 'bg-(--chrome-action-hover) text-foreground' : undefined,
++    // No fill at rest: the chip sits on whatever the statusbar is (pure
++    // #191919 in the dark palette). The filled bolt + label carry the state;
++    // only hover tints it.
++    className: mode === 'off' ? 'text-foreground' : undefined,
+     icon: mode === 'off' ? <ZapFilled className="size-3.5" /> : <Zap className="size-3.5 opacity-70" />,
+     id: 'approval-mode',
+     label: labels[mode],
+diff --git a/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx b/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+index a0f3fbf712..e732e84882 100644
+--- a/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
++++ b/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+@@ -26,7 +26,6 @@ import {
+   Activity,
+   AlertCircle,
+   Clock,
+-  Command,
+   FolderOpen,
+   Globe,
+   Hash,
+@@ -508,18 +507,6 @@ export function useStatusbarItems({
+ 
+   const coreLeftStatusbarItems = useMemo<readonly StatusbarItem[]>(
+     () => [
+-      {
+-        className: `w-7 justify-center px-0${commandCenterOpen ? ' bg-accent/55 text-foreground' : ''}`,
+-        icon: <Command className="size-3.5" />,
+-        id: 'command-center',
+-        // The system icon: the way into every other surface, including the
+-        // settings that would bring a hidden item back. Never hideable.
+-        lockedVisible: true,
+-        onSelect: toggleCommandCenter,
+-        title: commandCenterOpen ? copy.closeCommandCenter : copy.openCommandCenter,
+-        toggleLabel: copy.toggleCommandCenter,
+-        variant: 'action'
+-      },
+       {
+         hidden: !sessionsShowing,
+         id: 'gateway-switcher',
+@@ -669,7 +656,6 @@ export function useStatusbarItems({
+       agentsOpen,
+       botsShowing,
+       changeWorkspaceItem,
+-      commandCenterOpen,
+       copy,
+       currentCwd,
+       focusedWorkspaceRemote,
+@@ -691,8 +677,7 @@ export function useStatusbarItems({
+       projectName,
+       sessionsShowing,
+       subagentsFailed,
+-      subagentsRunning,
+-      toggleCommandCenter
++      subagentsRunning
+     ]
+   )
+ 
+diff --git a/apps/desktop/src/app/shell/sidebar-label.tsx b/apps/desktop/src/app/shell/sidebar-label.tsx
+index 6fa727b036..4e0c35834d 100644
+--- a/apps/desktop/src/app/shell/sidebar-label.tsx
++++ b/apps/desktop/src/app/shell/sidebar-label.tsx
+@@ -4,19 +4,33 @@ import { cn } from '@/lib/utils'
+ 
+ interface SidebarPanelLabelProps extends React.ComponentProps<'span'> {
+   dotClassName?: string
++  /** The little dither square before the label. Off for captions that read as
++   *  plain section names (Projects). */
++  dot?: boolean
+   meta?: React.ReactNode
++  /** CSS uppercasing. Off keeps the label's own casing. */
++  uppercase?: boolean
+ }
+ 
+-export function SidebarPanelLabel({ children, className, dotClassName, meta, ...props }: SidebarPanelLabelProps) {
++export function SidebarPanelLabel({
++  children,
++  className,
++  dot = true,
++  dotClassName,
++  meta,
++  uppercase = true,
++  ...props
++}: SidebarPanelLabelProps) {
+   return (
+     <span
+       className={cn(
+-        'flex min-w-0 items-center gap-2 pl-2 text-[0.64rem] font-semibold uppercase tracking-[0.16em] text-(--theme-primary)',
++        'flex min-w-0 items-center gap-2 pl-2 text-[0.64rem] font-semibold tracking-[0.16em] text-(--ui-text-quaternary)',
++        uppercase && 'uppercase',
+         className
+       )}
+       {...props}
+     >
+-      <span aria-hidden="true" className={cn('dither inline-block size-2 shrink-0 rounded-[1px]', dotClassName)} />
++      {dot && <span aria-hidden="true" className={cn('dither inline-block size-2 shrink-0 rounded-[1px]', dotClassName)} />}
+       <span className="min-w-0 truncate leading-none">{children}</span>
+       {meta && (
+         <span className="shrink-0 text-[0.6875rem] font-medium tracking-normal text-(--ui-text-quaternary)">
+diff --git a/apps/desktop/src/app/shell/statusbar-controls.tsx b/apps/desktop/src/app/shell/statusbar-controls.tsx
+index 0be4d5b97f..da2fcce571 100644
+--- a/apps/desktop/src/app/shell/statusbar-controls.tsx
++++ b/apps/desktop/src/app/shell/statusbar-controls.tsx
+@@ -17,6 +17,7 @@ import { ContribRender } from '@/contrib/react/boundary'
+ import { useI18n } from '@/i18n'
+ import { useKeybindHint } from '@/lib/keybinds/use-keybind-hint'
+ import { cn } from '@/lib/utils'
++import { $minimalBottomBar } from '@/store/minimal-chrome-prefs'
+ import {
+   $statusbarHiddenIds,
+   isStatusbarLayoutDefault,
+@@ -104,9 +105,16 @@ interface StatusbarControlsProps extends ComponentProps<'footer'> {
+ export function StatusbarControls({ className, leftItems = [], items = [], ...props }: StatusbarControlsProps) {
+   const navigate = useNavigate()
+   const hiddenIds = useStore($statusbarHiddenIds)
++  // Minimal bottom bar: only the chat-critical controls stay — the approval
++  // mode chip (never hidden: it is how you know whether the agent may act on
++  // its own) and the ⌘. The bar itself remains; it holds the chat/sidebar
++  // colour split.
++  const minimalBottomBar = useStore($minimalBottomBar)
+ 
+   const visible = (item: StatusbarItem) =>
+-    !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenIds.includes(item.id))
++    !item.hidden &&
++    (item.lockedVisible || !item.toggleLabel || !hiddenIds.includes(item.id)) &&
++    (!minimalBottomBar || item.id === 'approval-mode' || item.id === 'command-center')
+ 
+   return (
+     <ContextMenu>
+diff --git a/apps/desktop/src/app/shell/statusbar-visibility.test.tsx b/apps/desktop/src/app/shell/statusbar-visibility.test.tsx
+index 2744d920fa..9b203f813a 100644
+--- a/apps/desktop/src/app/shell/statusbar-visibility.test.tsx
++++ b/apps/desktop/src/app/shell/statusbar-visibility.test.tsx
+@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router'
+ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+ 
+ import { StatusbarControls, type StatusbarItem } from '@/app/shell/statusbar-controls'
++import { $minimalBottomBar } from '@/store/minimal-chrome-prefs'
+ import {
+   $statusbarHiddenIds,
+   $statusbarVisible,
+@@ -20,6 +21,7 @@ afterEach(() => {
+   cleanup()
+   $statusbarHiddenIds.set([...STATUSBAR_HIDDEN_BY_DEFAULT])
+   $statusbarVisible.set(true)
++  $minimalBottomBar.set(false)
+ })
+ 
+ const item = (id: string, label: string, extra: Partial<StatusbarItem> = {}): StatusbarItem => ({
+@@ -163,3 +165,18 @@ describe('whole-bar visibility', () => {
+     expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
+   })
+ })
++
++describe('minimal bottom bar', () => {
++  // The approval chip is a safety readout: whether the agent may act on its own.
++  // It must survive the minimal bar even though every decorative control goes.
++  it('keeps the approval chip and drops the rest', () => {
++    $minimalBottomBar.set(true)
++
++    bar([item('approval-mode', 'Ask'), item('cron', 'Cron'), item('gateway-health', 'Gateway')])
++
++    expect(screen.getByText('Ask')).toBeTruthy()
++    expect(screen.queryByText('Cron')).toBeNull()
++    expect(screen.queryByText('Gateway')).toBeNull()
++  })
++
++})
+diff --git a/apps/desktop/src/app/shell/titlebar-controls.test.tsx b/apps/desktop/src/app/shell/titlebar-controls.test.tsx
+index fd1fe39968..956cf1e47a 100644
+--- a/apps/desktop/src/app/shell/titlebar-controls.test.tsx
++++ b/apps/desktop/src/app/shell/titlebar-controls.test.tsx
+@@ -291,7 +291,9 @@ describe('titlebar app-action cluster', () => {
+     }
+   })
+ 
+-  it('moves settings, layout, and HUD to the left when the appearance setting says left', () => {
++  // The layout-editor button is gone from the cluster (the keybind still opens
++  // edit mode); the group is Settings + Command Center + HUD now.
++  it('moves settings and HUD to the left when the appearance setting says left', () => {
+     setTitlebarAppActionsSide('left')
+     renderControls('/')
+ 
+@@ -299,8 +301,8 @@ describe('titlebar app-action cluster', () => {
+     const right = screen.getByLabelText('App controls')
+ 
+     expect(within(left).getByLabelText('Open settings')).toBeTruthy()
+-    expect(within(left).getByLabelText('Layout editor')).toBeTruthy()
+     expect(within(left).getByLabelText('HUD mode')).toBeTruthy()
++    expect(within(left).queryByLabelText('Layout editor')).toBeNull()
+     expect(within(right).queryByLabelText('Open settings')).toBeNull()
+   })
+ 
+@@ -315,6 +317,6 @@ describe('titlebar app-action cluster', () => {
+     act(() => setTitlebarAppActionsSide('left'))
+     expect(screen.queryByLabelText('HUD mode')).toBeNull()
+     expect(within(screen.getByLabelText('Window controls')).getByLabelText('Open settings')).toBeTruthy()
+-    expect(screen.getByLabelText('Layout editor')).toBeTruthy()
++    expect(screen.queryByLabelText('Layout editor')).toBeNull()
+   })
+ })
+diff --git a/apps/desktop/src/app/shell/titlebar-controls.tsx b/apps/desktop/src/app/shell/titlebar-controls.tsx
+index 00c198be24..4878455ed7 100644
+--- a/apps/desktop/src/app/shell/titlebar-controls.tsx
++++ b/apps/desktop/src/app/shell/titlebar-controls.tsx
+@@ -1,14 +1,13 @@
+ import { compactNumber } from '@hermes/shared'
+ import { useStore } from '@nanostores/react'
+-import { type ComponentProps, type MouseEvent, type ReactNode, useEffect, useState } from 'react'
++import { Command } from 'lucide-react'
++import { type ComponentProps, type MouseEvent, type ReactNode, useEffect } from 'react'
+ import { useLocation, useNavigate } from 'react-router'
+ 
+ import { hudTargetSessionId } from '@/app/hud/handoff'
+ import { PANE_TOGGLE_REVEAL_EVENT } from '@/components/pane-shell'
+-import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
+ import { $narrowOverlayPaneIds } from '@/components/pane-shell/narrow-overlay-state'
+ import { $narrowViewport } from '@/components/pane-shell/tree/store'
+-import { resetLayoutTree } from '@/components/pane-shell/tree/store'
+ import { Badge } from '@/components/ui/badge'
+ import { Button } from '@/components/ui/button'
+ import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
+@@ -17,7 +16,6 @@ import { useContributions } from '@/contrib/react/use-contributions'
+ import { useI18n } from '@/i18n'
+ import { triggerHaptic } from '@/lib/haptics'
+ import { hostHas } from '@/lib/host-capabilities'
+-import { formatModifierToken } from '@/lib/keybinds/combo'
+ import { cn } from '@/lib/utils'
+ import { recordAction } from '@/store/desktop-metrics'
+ import { canUseHud, toggleHud } from '@/store/hud'
+@@ -29,20 +27,17 @@ import {
+   CHAT_SIDEBAR_PANE_ID,
+   FILE_BROWSER_PANE_ID,
+   toggleLeftSide,
+-  togglePanesFlipped,
+   toggleRightSide
+ } from '@/store/layout'
+ import { REVIEW_PANE_ID } from '@/store/review'
+ import { $unreadSessionCount } from '@/store/session-dot-state'
+ import { $titlebarAppActionsSide, TITLEBAR_FIXED_TOOLS } from '@/store/titlebar-app-actions'
+ 
+-import { appViewForPath, hidesFixedTitlebarClusters, isOverlayView } from '../routes'
++import { appViewForPath, COMMAND_CENTER_ROUTE, hidesFixedTitlebarClusters, isOverlayView, NEW_CHAT_ROUTE } from '../routes'
+ 
+ import {
+   TITLEBAR_CHROME_CHANGED_EVENT,
+-  TITLEBAR_ICON_BADGE_SCALE,
+   titlebarButtonClass,
+-  titlebarIconSizeCss,
+   titlebarToolClusterClass
+ } from './titlebar'
+ import { TitlebarIcon } from './titlebar-icon'
+@@ -78,29 +73,6 @@ interface TitlebarControlsProps extends ComponentProps<'div'> {
+   onOpenSettings: () => void
+ }
+ 
+-/**
+- * The layout button's glyph. Morphs into its composite reset form — the
+- * layout icon wearing a small counter-clockwise arrow badge ("layout, back
+- * to how it was") — ONLY while the pointer is on the button AND ⌘/Ctrl is
+- * held: hover gates via CSS (`group/tool` on the button), the modifier via
+- * the window listener. Pressing the modifier elsewhere changes nothing.
+- */
+-function LayoutGlyph({ modHeld }: { modHeld: boolean }) {
+-  return (
+-    <>
+-      <span className={cn('inline-flex', modHeld && 'group-hover/tool:hidden')}>
+-        <TitlebarIcon name="layout" />
+-      </span>
+-      <span className={cn('relative hidden', modHeld && 'group-hover/tool:inline-flex')}>
+-        <TitlebarIcon name="layout" />
+-        <span className="absolute -bottom-1 -right-1.5 grid place-items-center rounded-full bg-(--ui-bg-chrome) p-px">
+-          <TitlebarIcon className="-scale-x-100" name="refresh" size={titlebarIconSizeCss(TITLEBAR_ICON_BADGE_SCALE)} />
+-        </span>
+-      </span>
+-    </>
+-  )
+-}
+-
+ /** Overlay count on a titlebar glyph. Hidden when count is 0/undefined. */
+ function withCountBadge(icon: ReactNode, count: number | undefined): ReactNode {
+   if (!count) {
+@@ -119,29 +91,6 @@ function withCountBadge(icon: ReactNode, count: number | undefined): ReactNode {
+   )
+ }
+ 
+-/** Live ⌘/Ctrl tracking — mod-click affordances telegraph themselves (the
+- *  layout button morphs into its reset form while the modifier is down). */
+-function useModifierHeld(): boolean {
+-  const [held, setHeld] = useState(false)
+-
+-  useEffect(() => {
+-    const sync = (event: KeyboardEvent) => setHeld(event.metaKey || event.ctrlKey)
+-    const clear = () => setHeld(false)
+-
+-    window.addEventListener('keydown', sync)
+-    window.addEventListener('keyup', sync)
+-    window.addEventListener('blur', clear)
+-
+-    return () => {
+-      window.removeEventListener('keydown', sync)
+-      window.removeEventListener('keyup', sync)
+-      window.removeEventListener('blur', clear)
+-    }
+-  }, [])
+-
+-  return held
+-}
+-
+ interface SidebarEdge {
+   /** Whether the side reads as open, which picks the button's Show or Hide label. */
+   open: boolean
+@@ -187,7 +136,6 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+   const { t } = useI18n()
+   const navigate = useNavigate()
+   const location = useLocation()
+-  const modHeld = useModifierHeld()
+   const panesFlipped = useStore($panesFlipped)
+   const unreadCount = useStore($unreadSessionCount)
+   const appActionsSide = useStore($titlebarAppActionsSide)
+@@ -218,6 +166,9 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+   const sidebarTool: TitlebarTool = {
+     ...TITLEBAR_FIXED_TOOLS.sidebar,
+     actionId: 'view.toggleSidebar',
++    // Ink at rest: this is the primary way back to the sidebar, not a
++    // secondary tool that only lights up on hover.
++    className: 'text-foreground',
+     badge: panesFlipped ? undefined : unreadBadge,
+     icon: <TitlebarIcon name="layout-sidebar-left" />,
+     id: 'sidebar',
+@@ -229,18 +180,6 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+     }
+   }
+ 
+-  const flipTool: TitlebarTool = {
+-    ...TITLEBAR_FIXED_TOOLS['flip-panes'],
+-    actionId: 'view.flipPanes',
+-    icon: <TitlebarIcon name="arrow-swap" />,
+-    id: 'flip-panes',
+-    label: t.titlebar.swapSidebarSides,
+-    onSelect: () => {
+-      triggerHaptic('tap')
+-      togglePanesFlipped()
+-    }
+-  }
+-
+   const rightSidebarTool: TitlebarTool = {
+     ...TITLEBAR_FIXED_TOOLS['right-sidebar'],
+     actionId: 'view.toggleRightSidebar',
+@@ -256,6 +195,11 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+     tour: 'right-pane-toggle'
+   }
+ 
++  const view = appViewForPath(location.pathname)
++  const inCommandCenter = view === 'command-center'
++
++
++
+   // Static system tools — always pinned to the screen's right edge so the
+   // left titlebar stays free for tabs (#107351).
+   const systemTools: TitlebarTool[] = [
+@@ -271,25 +215,16 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+       }
+     },
+     {
+-      ...TITLEBAR_FIXED_TOOLS.layout,
+-      className: 'group/tool',
+-      // Hover + held ⌘/Ctrl morphs the glyph into its reset form (see
+-      // LayoutGlyph) — the mod-click telegraphs itself before it happens.
+-      icon: <LayoutGlyph modHeld={modHeld} />,
+-      id: 'layout',
+-      label: t.titlebar.layoutEditor,
+-      onSelect: event => {
+-        if (event?.metaKey || event?.ctrlKey) {
+-          triggerHaptic('warning')
+-          resetLayoutTree()
+-
+-          return
+-        }
+-
++      // The Command Center door, promoted out of the statusbar into the right
++      // cluster: it sits between Settings and the layout editor. No size class
++      // on the glyph, so `icon-titlebar` gives it the shared 13.9px metric.
++      icon: <Command />,
++      id: 'command-center',
++      label: inCommandCenter ? t.shell.statusbar.closeCommandCenter : t.shell.statusbar.openCommandCenter,
++      onSelect: () => {
+         triggerHaptic('open')
+-        toggleLayoutEditMode()
+-      },
+-      title: t.titlebar.layoutEditorTitle(formatModifierToken('mod'))
++        navigate(inCommandCenter ? NEW_CHAT_ROUTE : COMMAND_CENTER_ROUTE)
++      }
+     },
+     {
+       ...TITLEBAR_FIXED_TOOLS.hud,
+@@ -309,8 +244,6 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+     }
+   ]
+ 
+-  const view = appViewForPath(location.pathname)
+-
+   // Route changes can replace measured clusters without resizing the panels.
+   useEffect(() => {
+     window.dispatchEvent(new CustomEvent(TITLEBAR_CHROME_CHANGED_EVENT))
+@@ -362,7 +295,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+ 
+   const visibleSystemTools = appActionsSide === 'right' ? systemTools.filter(visibleTool) : []
+   const visiblePaneTools = tools.filter(visibleTool)
+-  const visibleRightFixedTools = [flipTool, rightSidebarTool].filter(visibleTool)
++  const visibleRightFixedTools = [rightSidebarTool].filter(visibleTool)
+ 
+   return (
+     <>
+@@ -374,6 +307,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
+         <Slot area="titleBar.center" />
+       </div>
+ 
++
+       {visiblePaneTools.length > 0 && (
+         <div
+           aria-label={t.shell.appControls}
+diff --git a/apps/desktop/src/app/shell/use-sidebar-column-width.ts b/apps/desktop/src/app/shell/use-sidebar-column-width.ts
+new file mode 100644
+index 0000000000..d418c48299
+--- /dev/null
++++ b/apps/desktop/src/app/shell/use-sidebar-column-width.ts
+@@ -0,0 +1,84 @@
++import { type RefObject, useEffect } from 'react'
++
++/**
++ * Publishes the sidebar column's live width as `--sidebar-column-width` on the
++ * shell root.
++ *
++ * The statusbar is one full-width band, but its left stretch sits under the
++ * sidebar and must keep the sidebar's colour; the chrome bands split at this
++ * seam instead of at a hard-coded pixel, so dragging, collapsing or flipping
++ * the column keeps the split aligned with the real panel edge.
++ */
++export function useSidebarColumnWidth(rootRef: RefObject<HTMLElement | null>) {
++  useEffect(() => {
++    const root = rootRef.current
++
++    if (!root) {
++      return
++    }
++
++    let column: HTMLElement | null = null
++    let frame = 0
++    let attempts = 0
++
++    // Publish on the ROOT element, not the shell div: fixed-position titlebar
++    // clusters live in their own stacking/portal context and would otherwise
++    // read the fallback instead of the live column width.
++    const publish = () => {
++      document.documentElement.style.setProperty(
++        '--sidebar-column-width',
++        column ? `${Math.round(column.getBoundingClientRect().width)}px` : '0px'
++      )
++    }
++
++    const observer = new ResizeObserver(publish)
++
++    // The pane tree mounts a beat after the shell; retry on frames until the
++    // sidebar exists, then hand off to the resize observer.
++    const attach = (): boolean => {
++      const next = root.querySelector<HTMLElement>('[data-slot="sidebar"]')
++
++      if (next !== column) {
++        if (column) {
++          observer.unobserve(column)
++        }
++
++        column = next
++
++        if (column) {
++          observer.observe(column)
++        }
++
++        publish()
++      }
++
++      return Boolean(next)
++    }
++
++    const tick = () => {
++      if (attach() || attempts++ > 240) {
++        return
++      }
++
++      frame = requestAnimationFrame(tick)
++    }
++
++    tick()
++    window.addEventListener('resize', publish)
++
++    // Panes close and reopen; a cheap liveness check re-attaches when the
++    // column node is replaced (the resize observer alone would go stale).
++    const interval = window.setInterval(() => {
++      if (!column || !column.isConnected) {
++        attach()
++      }
++    }, 2000)
++
++    return () => {
++      cancelAnimationFrame(frame)
++      window.removeEventListener('resize', publish)
++      window.clearInterval(interval)
++      observer.disconnect()
++    }
++  }, [rootRef])
++}
+diff --git a/apps/desktop/src/app/updates-overlay.tsx b/apps/desktop/src/app/updates-overlay.tsx
+index 869f000ebd..0453d302aa 100644
+--- a/apps/desktop/src/app/updates-overlay.tsx
++++ b/apps/desktop/src/app/updates-overlay.tsx
+@@ -450,7 +450,7 @@ function IdleView({
+   return (
+     <div className="grid gap-5 px-6 pb-6 pt-7 pr-8">
+       <div className="flex flex-col items-center gap-3 text-center">
+-        <BrandMark className="size-16" />
++        <BrandMark className="size-16" sweep />
+ 
+         <DialogTitle className="text-center text-xl">{title}</DialogTitle>
+         <DialogDescription className="text-center text-sm">{body}</DialogDescription>
+diff --git a/apps/desktop/src/components/pane-shell/tree/renderer/collapse-restore-affordance.test.tsx b/apps/desktop/src/components/pane-shell/tree/renderer/collapse-restore-affordance.test.tsx
+index 1f7fb1809c..68e4f5ddb1 100644
+--- a/apps/desktop/src/components/pane-shell/tree/renderer/collapse-restore-affordance.test.tsx
++++ b/apps/desktop/src/components/pane-shell/tree/renderer/collapse-restore-affordance.test.tsx
+@@ -89,7 +89,7 @@ const zoneAt = (index: number) => {
+   return (node.type === 'split' ? node.children[index] : node) as GroupNode
+ }
+ 
+-describe('Sessions/Bots strip — #91223', () => {
++describe('Sessions/Bots column — no strip', () => {
+   beforeEach(() => {
+     registerPane('sessions', { hideOnly: true, placement: 'left' }, 'Sessions')
+     registerPane('hermes-bots:pane', { hideOnly: true, placement: 'left' }, 'Bots')
+@@ -102,56 +102,24 @@ describe('Sessions/Bots strip — #91223', () => {
+     )
+   })
+ 
+-  it('double-clicking the Sessions tab leaves the strip and both chips', () => {
++  // The switch moved to the sidebar zone header; a hide-only column never
++  // renders a tab strip, whatever strip mode the layout carries.
++  it('never renders a strip for the sessions/Bots column', () => {
+     render(<LiveTreeGroup parentAxis="row" />)
+ 
+-    doubleTap(tabEl('sessions')!)
+-
+-    expect(tablist()).toBeTruthy()
+-    expect(tabEl('sessions')).toBeTruthy()
+-    expect(tabEl('hermes-bots:pane')).toBeTruthy()
+-    expect(zoneAt(0).minimized).toBeFalsy()
+-    expect(zoneAt(0).tabStrip).toBeUndefined()
+-  })
+-
+-  it('tapping the strip gutter does not collapse the sidebar', () => {
+-    render(<LiveTreeGroup parentAxis="row" />)
+-
+-    tap(globalThis.document.querySelector('[data-zone-tabstrip="g-side"]')!)
+-
++    expect(tablist()).toBeNull()
++    expect(tabEl('sessions')).toBeNull()
+     expect(zoneAt(0).minimized).toBeFalsy()
+-    expect(tabEl('sessions')).toBeTruthy()
+-    expect(tabEl('hermes-bots:pane')).toBeTruthy()
+   })
+ 
+-  it('an explicit never hides the sessions/Bots strip', () => {
+-    setTreeGroupTabStrip('g-side', 'never')
++  it('keeps the strip hidden even when the zone asks for one', () => {
++    setTreeGroupTabStrip('g-side', 'always')
+     expect(tabStripVisibleForGroup(zoneAt(0))).toBe(false)
+ 
+     render(<LiveTreeGroup parentAxis="row" />)
+ 
+     expect(tablist()).toBeNull()
+   })
+-
+-  it('lets keyboard focus move between tabs without activating until Enter or Space', () => {
+-    render(<LiveTreeGroup parentAxis="row" />)
+-    const sessions = tabEl('sessions') as HTMLElement
+-    const bots = tabEl('hermes-bots:pane') as HTMLElement
+-    act(() => sessions.focus())
+-
+-    expect(sessions.tabIndex).toBe(0)
+-    expect(bots.tabIndex).toBe(-1)
+-    fireEvent.keyDown(sessions, { key: 'ArrowRight' })
+-    expect(globalThis.document.activeElement).toBe(bots)
+-    expect(zoneAt(0).active).toBe('sessions')
+-    fireEvent.keyDown(bots, { key: 'Enter' })
+-    expect(zoneAt(0).active).toBe('hermes-bots:pane')
+-    expect(globalThis.document.activeElement).toBe(bots)
+-    fireEvent.keyDown(bots, { key: 'Home' })
+-    fireEvent.keyDown(sessions, { key: ' ' })
+-    expect(zoneAt(0).active).toBe('sessions')
+-    expect(globalThis.document.activeElement).toBe(sessions)
+-  })
+ })
+ 
+ describe('docked tool tile — collapsing keeps the restore chip', () => {
+diff --git a/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.test.ts b/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.test.ts
+index 9d745e5c97..5d5c75aad3 100644
+--- a/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.test.ts
++++ b/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.test.ts
+@@ -8,7 +8,7 @@ import { resolveTabStripVisible, type StripPane, tabStripVisibleForZone } from '
+ const tile = (): StripPane => ({ collapsePane: false, placement: 'main' })
+ const workspace = (): StripPane => ({ collapsePane: false, placement: 'main', uncloseable: true })
+ const toolPanel = (): StripPane => ({ collapsePane: true, placement: 'bottom' })
+-const sideChrome = (): StripPane => ({ collapsePane: false, placement: 'right' })
++const sideChrome = (): StripPane => ({ collapsePane: false, hideOnly: true, placement: 'right' })
+ 
+ describe('auto (no stored choice)', () => {
+   it('gives a lone workspace its strip so the tab and + stay on screen', () => {
+@@ -32,22 +32,36 @@ describe('the stored choice', () => {
+   })
+ })
+ 
+-// THE invariant the old boolean could not hold. `never` used to sit above the
+-// force-visible rule, so hiding a zone that held only a closeable tile left a
+-// surface with no tab, no ✕ and no menu — the "how do I get it back" reports.
++// The handles a chat zone needs live in the sidebar (activate, close) and the
++// strip returns with ⌘⌥T, so `never` may hide a lone chat tile. What `never`
++// may NOT do is strand a surface that has no other handle — a lone tool panel
++// or the workspace — and it never reaches a zone with no conversation in it,
++// where the strip is navigation rather than tab chrome.
+ describe('no dead zone', () => {
+-  it('keeps the strip for a lone closeable tile even when the zone says never', () => {
+-    expect(resolveTabStripVisible({ mode: 'never', shown: [tile()] })).toBe(true)
++  it('hides the strip for a lone chat tile', () => {
++    // Regression guard for the "sidebar is the only switcher" mode: a single
++    // open chat must not put a tab bar back above the transcript.
++    expect(resolveTabStripVisible({ mode: 'never', shown: [tile()] })).toBe(false)
+   })
+ 
+   it('keeps the strip for a lone tool panel even when the zone says never', () => {
+     expect(resolveTabStripVisible({ mode: 'never', shown: [toolPanel()] })).toBe(true)
+   })
+ 
+-  it('keeps the strip for a lone workspace even when the zone says never', () => {
+-    // Workspace cannot leave the tree, but Close still empties it to a draft
+-    // and + still opens a tab. Chromeless is a dead zone for those handles.
+-    expect(resolveTabStripVisible({ mode: 'never', shown: [workspace()] })).toBe(true)
++  it('hides the chat strip for a lone workspace when the zone says never', () => {
++    // The workspace is the primary chat surface, and "never" is the user
++    // saying the sidebar is the switcher: ⌘N starts a chat and ⌘⌥T restores
++    // the strip, so the header is chrome, not the last handle.
++    expect(resolveTabStripVisible({ mode: 'never', shown: [workspace()] })).toBe(false)
++  })
++
++  it('hides navigation zones too when the app-wide setting says never', () => {
++    // The Sessions / Bots column is switched from the titlebar now, so the
++    // app-wide "no tabs above the conversation" applies to it as well.
++    expect(resolveTabStripVisible({ mode: 'never', modeFromDefault: true, shown: [sideChrome(), sideChrome()] })).toBe(
++      false
++    )
++    expect(resolveTabStripVisible({ mode: 'never', modeFromDefault: true, shown: [sideChrome()] })).toBe(false)
+   })
+ 
+   it('still hides a zone that cannot strand anything', () => {
+@@ -90,12 +104,15 @@ describe('a full-page view', () => {
+   })
+ })
+ 
+-// Every launch and client update lands on a lone workspace. Chromeless, that
+-// layout had no session switcher, no Close and no "+" (#89350).
++// Every launch and client update lands on a lone workspace. On `auto` its strip
++// stays (it carries the +); on `never` the sidebar is the chosen switcher and
++// ⌘⌥T (or Settings → Appearance → Tab Strip) is the way back, so the header is
++// allowed to go. #89350 was the strip vanishing with NO way back — the way back
++// is what keeps this from being a dead end.
+ describe('a lone workspace', () => {
+-  it('keeps its strip whatever the zone says', () => {
++  it('keeps its strip on auto, drops it on never', () => {
+     expect(resolveTabStripVisible({ shown: [workspace()] })).toBe(true)
+-    expect(resolveTabStripVisible({ mode: 'never', shown: [workspace()] })).toBe(true)
++    expect(resolveTabStripVisible({ mode: 'never', shown: [workspace()] })).toBe(false)
+     // Standing side chrome never joins the tabbed workflow.
+     expect(resolveTabStripVisible({ shown: [sideChrome()] })).toBe(false)
+   })
+@@ -130,8 +147,10 @@ describe('tabStripVisibleForZone', () => {
+ 
+   it('reads placement, uncloseable and collapse off the contributions', () => {
+     expect(visible(['workspace'])).toBe(true)
+-    expect(visible(['workspace'], 'never')).toBe(true)
+-    expect(visible(['tile:a'], 'never')).toBe(true)
++    // "No tabs, choose in the sidebar": a lone chat surface — workspace or
++    // session tile — lets the strip go, while a lone tool panel keeps its grip.
++    expect(visible(['workspace'], 'never')).toBe(false)
++    expect(visible(['tile:a'], 'never')).toBe(false)
+     expect(visible(['terminal'], 'never')).toBe(true)
+   })
+ 
+@@ -140,7 +159,7 @@ describe('tabStripVisibleForZone', () => {
+     expect(visible(['workspace'])).toBe(true)
+ 
+     setTabStripDefault('never')
+-    expect(visible(['workspace'])).toBe(true)
++    expect(visible(['workspace'])).toBe(false)
+     expect(visible(['workspace', 'terminal'])).toBe(false)
+   })
+ 
+diff --git a/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.ts b/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.ts
+index 908290b0f4..61cd5ba678 100644
+--- a/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.ts
++++ b/apps/desktop/src/components/pane-shell/tree/renderer/strip-visibility.ts
+@@ -19,6 +19,9 @@ import { paneChrome } from './track-model'
+ export interface StripPane {
+   /** A tool panel (terminal / logs) that collapses rather than closes. */
+   collapsePane: boolean
++  /** Standing side chrome that has no close gesture — Sessions / Bots. Its
++   *  pane cannot leave the tree, so the area's strip is its only chrome. */
++  hideOnly?: boolean
+   /** Contribution placement — `'main'` marks a docked tile (session, page,
+    *  preview) as opposed to standing side chrome. */
+   placement?: string
+@@ -29,8 +32,14 @@ export interface StripPane {
+ export interface StripZone {
+   /** The ACTIVE pane declines to be tabbed (a full-page view). */
+   headerVeto?: boolean
++  /** Every pane here is hide-only chrome (Sessions / Bots). Its switch lives in
++   *  the titlebar, so this column never renders a strip — whatever mode a
++   *  saved layout asks for. */
++  sideChromeOnly?: boolean
+   /** The zone's standing choice; undefined = auto. */
+   mode?: TabStripMode
++  /** `mode` came from the app-wide setting rather than this zone's own choice. */
++  modeFromDefault?: boolean
+   /** Panes currently rendered as chips — chrome-hidden and narrow-collapsed
+    *  panes are already filtered out. */
+   shown: readonly StripPane[]
+@@ -80,6 +89,25 @@ export function resolveTabStripVisible(zone: StripZone): boolean {
+     return false
+   }
+ 
++  if (zone.sideChromeOnly) {
++    return false
++  }
++
++  // A main pane is the conversation surface (the workspace chat or a session
++  // tile). Its strip is chrome: the sidebar activates and closes sessions, so
++  // hiding it strands nothing.
++  const hasMain = zone.shown.some(pane => pane.placement === 'main')
++  if (zone.mode === 'never') {
++    // A chat zone takes `never` even with one pane: the sidebar is the
++    // switcher, ⌘N starts a chat and ⌘⌥T restores the strip, so the header is
++    // chrome rather than the last handle. A lone tool panel still keeps its
++    // strip below — the chip is its only grip. The Sessions / Bots column is
++    // switched from the titlebar, so it needs no strip either.
++    if (hasMain) {
++      return false
++    }
++  }
++
+   if (stranded(zone.shown)) {
+     return true
+   }
+@@ -112,12 +140,16 @@ export function tabStripVisibleForZone(zone: {
+ }): boolean {
+   return resolveTabStripVisible({
+     headerVeto: paneChrome(zone.paneFor(zone.active)).headerVeto,
++    sideChromeOnly:
++      zone.shown.length > 0 && zone.shown.every(id => paneChrome(zone.paneFor(id)).hideOnly),
+     mode: effectiveTabStripMode(zone.mode),
++    modeFromDefault: zone.mode === undefined,
+     shown: zone.shown.map(id => {
+       const chrome = paneChrome(zone.paneFor(id))
+ 
+       return {
+         collapsePane: zone.isCollapsePane(id),
++        hideOnly: chrome.hideOnly,
+         placement: chrome.placement,
+         uncloseable: chrome.uncloseable
+       }
+diff --git a/apps/desktop/src/components/pane-shell/tree/renderer/track-model.ts b/apps/desktop/src/components/pane-shell/tree/renderer/track-model.ts
+index d49b5040b4..cfc56589ad 100644
+--- a/apps/desktop/src/components/pane-shell/tree/renderer/track-model.ts
++++ b/apps/desktop/src/components/pane-shell/tree/renderer/track-model.ts
+@@ -113,6 +113,11 @@ interface PaneChrome extends PaneSizing {
+   headerVeto?: boolean
+   /** Page-owned controls in the panel's normal tab-header space. */
+   headerContent?: () => React.ReactNode
++  /** Which surface this pane paints its body with. The sidebar zone's chrome
++   *  (titlebar band + statusbar strip) follows the ACTIVE pane, so a pane that
++   *  paints the editor/chat surface (Bots) does not sit under a sidebar-grey
++   *  band. Absent = the zone's own default (sidebar). */
++  surface?: 'editor' | 'sidebar'
+   /** A lead NODE for this pane's TAB, rendered before the label. A session
+    *  pane (main workspace + tiles) passes its live `SessionStatusDot` here so
+    *  the tab and the sidebar row render status/color from the ONE primitive
+diff --git a/apps/desktop/src/components/pane-shell/tree/renderer/tree-group.tsx b/apps/desktop/src/components/pane-shell/tree/renderer/tree-group.tsx
+index 02c63f8508..1cab8afed0 100644
+--- a/apps/desktop/src/components/pane-shell/tree/renderer/tree-group.tsx
++++ b/apps/desktop/src/components/pane-shell/tree/renderer/tree-group.tsx
+@@ -80,6 +80,7 @@ import {
+   noteActiveTreeGroup,
+   reloadTreePane,
+   restoreTreePane,
++  revealTreePane,
+   SESSION_TILE_DRAG,
+   setStripTabHidden,
+   setTreeGroupMinimized,
+@@ -371,7 +372,14 @@ function CollapsedZoneRail({ activeId, children, menu, railSide }: CollapsedZone
+     <ZoneMenu {...menu}>
+       <div
+         className={cn(
+-          'flex h-full min-h-7 w-7 min-w-7 shrink-0 cursor-pointer select-none flex-col items-stretch bg-(--ui-sidebar-surface-background)',
++          'flex h-full min-h-7 w-7 min-w-7 shrink-0 cursor-pointer select-none flex-col items-stretch',
++          // A collapsed rail on the RIGHT is a slice of the content column, not
++          // of the sidebar: it takes the editor surface so the frame around the
++          // chat stays one colour. The tabs inside paint from
++          // --pane-tab-strip-bg, so they need the same surface.
++          railSide === 'right'
++            ? 'bg-(--ui-editor-surface-background) [--pane-tab-strip-bg:var(--ui-editor-surface-background)]'
++            : 'bg-(--ui-sidebar-surface-background) [--pane-tab-strip-bg:var(--ui-sidebar-surface-background)]',
+           // Strip line faces the content the zone collapsed away from.
+           railSide === 'right' ? PANE_TAB_STRIP_LINE_LEFT : PANE_TAB_STRIP_LINE_RIGHT
+         )}
+@@ -390,6 +398,11 @@ function CollapsedZoneRail({ activeId, children, menu, railSide }: CollapsedZone
+   )
+ }
+ 
++const SWITCH_PANES = [
++  ['comment-discussion', 'Sessions', 'sessions'],
++  ['robot', 'Bots', 'hermes-bots:pane']
++] as const
++
+ export function TreeGroup({
+   node,
+   parentAxis,
+@@ -472,6 +485,23 @@ export function TreeGroup({
+     topEdge
+   })
+ 
++  const editorSurfacePane = sidebarGroup && paneChrome(active).surface === 'editor'
++  useEffect(() => {
++    // The statusbar paints the sidebar column's colour with a gradient split at
++    // `--sidebar-column-width`; that strip has to follow the ACTIVE pane, not
++    // the zone's default surface, or a Bots column keeps a grey band under it.
++    // Only the sidebar's own group writes it — every other group leaves the var
++    // alone (a later group's cleanup would otherwise wipe it).
++    if (!sidebarGroup) {return}
++    const root = document.documentElement
++
++    if (editorSurfacePane) {root.style.setProperty('--sidebar-chrome-surface', 'var(--ui-editor-surface-background)')}
++    else {root.style.removeProperty('--sidebar-chrome-surface')}
++
++    return () => {
++      root.style.removeProperty('--sidebar-chrome-surface')
++    }
++  }, [editorSurfacePane, sidebarGroup])
+   const pageHeader = paneChrome(active).headerContent
+ 
+   // What the strip's "+" makes. The pane you are LOOKING AT answers first (a
+@@ -725,7 +755,16 @@ export function TreeGroup({
+           bounds, strip refs, focus ownership and split geometry as the body. */}
+       {(headerVisible || (topEdge && !verticalCollapse)) && (
+         <div
+-          className="relative flex min-w-0 shrink-0 bg-(--ui-sidebar-surface-background)"
++          className={cn(
++            'relative flex min-w-0 shrink-0',
++            // The band above the reading column IS the chrome framing the chat
++            // (its tab strip, or just the drag strip): paint it with the editor
++            // surface so the column reads as one dark sheet. A zone that only
++            // holds sidebar/tool panes keeps the sidebar surface.
++            sidebarGroup && paneChrome(active).surface !== 'editor'
++              ? 'bg-(--ui-sidebar-surface-background)'
++              : 'bg-(--ui-editor-surface-background)'
++          )}
+           data-panel-header=""
+           style={topEdge ? { height: topHeaderHeight } : undefined}
+         >
+@@ -948,6 +987,27 @@ export function TreeGroup({
+           {topEdge && (
+             <div aria-hidden="true" className="shrink-0" style={{ width: 'var(--panel-titlebar-right, 0px)' }} />
+           )}
++          {/* Sessions / Bots switch. It lives in the sidebar zone's own header
++              band, as a LAYOUT sibling of the window drag handle — the handle's
++              flex-1 shrinks around it, so no `-webkit-app-region: drag` box
++              ever sits under the buttons (an overlapping one swallows both the
++              hover and the click on macOS, whatever no-drag the button asks
++              for). */}
++          {topEdge && sidebarGroup && shown.includes('sessions') && (
++            <div className="relative z-10 flex shrink-0 items-center gap-0.5 self-start pr-1.5" style={{ height: titlebarHeight }}>
++              {SWITCH_PANES.map(([glyph, label, paneId]) => (
++                <button
++                  aria-label={label}
++                  className="grid size-6 place-items-center rounded-[4px] text-foreground transition-colors hover:bg-(--ui-control-hover-background)"
++                  key={paneId}
++                  onClick={() => revealTreePane(paneId)}
++                  type="button"
++                >
++                  <Codicon name={glyph} size="1rem" />
++                </button>
++              ))}
++            </div>
++          )}
+         </div>
+       )}
+ 
+diff --git a/apps/desktop/src/components/ui/context-menu.tsx b/apps/desktop/src/components/ui/context-menu.tsx
+index 6a98f4be39..173e2b66eb 100644
+--- a/apps/desktop/src/components/ui/context-menu.tsx
++++ b/apps/desktop/src/components/ui/context-menu.tsx
+@@ -32,7 +32,7 @@ function ContextMenuContent({ className, ...props }: React.ComponentProps<typeof
+     <ContextMenuPrimitive.Portal>
+       <ContextMenuPrimitive.Content
+         className={cn(
+-          'z-50 max-h-(--radix-context-menu-content-available-height) min-w-36 origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
++          'z-50 max-h-(--radix-context-menu-content-available-height) min-w-36 origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[10px] border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+           className
+         )}
+         data-slot="context-menu-content"
+@@ -160,7 +160,7 @@ function ContextMenuSubContent({
+         className={cn(
+           // `max-h-80` (not the Radix available-height var, which is published
+           // only on Content) so a long submenu scrolls instead of collapsing.
+-          'dt-portal-scrollbar z-50 max-h-80 min-w-36 origin-(--radix-context-menu-content-transform-origin) overflow-y-auto rounded-lg border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
++          'dt-portal-scrollbar z-50 max-h-80 min-w-36 origin-(--radix-context-menu-content-transform-origin) overflow-y-auto rounded-[10px] border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+           className
+         )}
+         collisionPadding={collisionPadding}
+diff --git a/apps/desktop/src/components/ui/menu.ts b/apps/desktop/src/components/ui/menu.ts
+index f50f5ce910..52b03522c1 100644
+--- a/apps/desktop/src/components/ui/menu.ts
++++ b/apps/desktop/src/components/ui/menu.ts
+@@ -7,7 +7,7 @@
+ // `.scrollbar-dt` for portaled overlays (Radix renders under document.body,
+ // outside #root's scope). See styles.css.
+ export const menuSurfaceClass =
+-  'dt-portal-scrollbar rounded-lg border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md'
++  'dt-portal-scrollbar rounded-[10px] border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--ui-bg-elevated)_96%,transparent)] p-1 text-[length:var(--conversation-text-font-size)] text-popover-foreground shadow-md backdrop-blur-md'
+ 
+ export const menuMotionClass =
+   'data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95'
+@@ -16,7 +16,7 @@ export const menuMotionClass =
+ // Radix rows take real focus (`focus:`), cmdk rows stay behind the input and
+ // mark `data-selected="true"`.
+ export const menuItemClass =
+-  "relative flex items-center gap-2 rounded-md px-2 py-1 text-xs focus-visible:outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
++  "relative flex items-center gap-2 rounded-[6px] px-2 py-1 text-xs focus-visible:outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+ 
+ export const menuItemFocusClass = 'focus:bg-(--ui-control-active-background) focus:text-foreground'
+ 
+diff --git a/apps/desktop/src/lib/ui-preferences/keys.ts b/apps/desktop/src/lib/ui-preferences/keys.ts
+index f99a4dda5f..359cfef485 100644
+--- a/apps/desktop/src/lib/ui-preferences/keys.ts
++++ b/apps/desktop/src/lib/ui-preferences/keys.ts
+@@ -53,6 +53,9 @@ const SHARED_KEYS: ReadonlySet<string> = new Set([
+   // Transcript and tools.
+   'hermes.desktop.hideThreadTimeline',
+   'hermes.desktop.reasoning.collapsedByDefault',
++  'hermes.desktop.singleActivity',
++  'hermes.desktop.statusStack.attentionOnly',
++  'hermes.desktop.minimalBottomBar',
+   'hermes.desktop.toolView.hideCodeDiffs',
+   'hermes.desktop.toolView.technical',
+   // Shell, panes and behaviour.
+diff --git a/apps/desktop/src/main.tsx b/apps/desktop/src/main.tsx
+index ce347fd14d..a36db00d78 100644
+--- a/apps/desktop/src/main.tsx
++++ b/apps/desktop/src/main.tsx
+@@ -93,6 +93,20 @@ if (winParam === 'overlay') {
+   // animations stop producing frames when nobody can see them.
+   installRendererAnimationPauseState()
+ 
++/** Hand the window over from index.html's boot splash to the real UI. Called on
++ *  the first painted frame after mount, never before: removing it earlier leaves
++ *  the window showing its bare background for however long the tree takes. */
++function dismissBootSplash() {
++  const splash = document.getElementById('boot-splash')
++
++  if (!splash) {
++    return
++  }
++
++  splash.setAttribute('data-gone', '')
++  window.setTimeout(() => splash.remove(), 300)
++}
++
+   createRoot(document.getElementById('root')!).render(
+     <StrictMode>
+       <RootErrorBoundary>
+@@ -126,4 +140,8 @@ if (winParam === 'overlay') {
+       </RootErrorBoundary>
+     </StrictMode>
+   )
++
++  // Two frames: one for React's commit, one for the paint that proves the shell
++  // is on screen.
++  requestAnimationFrame(() => requestAnimationFrame(dismissBootSplash))
+ }
+diff --git a/apps/desktop/src/styles.css b/apps/desktop/src/styles.css
+index 746cdc1f48..5f03a87a94 100644
+--- a/apps/desktop/src/styles.css
++++ b/apps/desktop/src/styles.css
+@@ -506,7 +506,7 @@
+        This is the default; each chat surface re-declares the calc against its own measurement (see below). */
+     --thread-last-message-clearance: calc(var(--composer-measured-height) + 2rem);
+ 
+-    --composer-shell-pad-block-end: 0.625rem;
++    --composer-shell-pad-block-end: 1.25rem;
+     --message-text-indent: 0.75rem;
+     --conversation-text-base-size: 0.8125rem;
+     --conversation-tool-base-size: 0.6875rem;
+@@ -539,7 +539,7 @@
+     --sticky-human-top: 0.23rem;
+     --file-tree-row-height: 1.375rem;
+ 
+-    --composer-width: 100%;
++    --composer-width: 45rem;
+     --composer-control-size: 1.5rem;
+     --composer-control-primary-size: 1.625rem;
+     --composer-voice-menu-size: 1.25rem;
+@@ -1380,8 +1380,120 @@
+   z-index: 6;
+ }
+ 
++/* BRAND MARK — draw-on sweep. A light band crosses the mark once per ~4s and is
++   clipped to the icon's own squircle. NOT masked with the PNG: `mask-image` on
++   a file:// asset resolves to an empty mask in this renderer (the artwork paints
++   as <img>, but the same URL as a CSS mask comes back transparent — verified, the
++   band never showed), and inlining a data: URL would cost a build step for a
++   12px highlight. Clipping to the rounded box is visually the same thing: the
++   band is inside the icon either way, and the corners it cuts are the ones the
++   PNG already leaves transparent. */
++.brand-sweep {
++  position: relative;
++  isolation: isolate;
++  /* The mark PNG is a squircle; a slightly tighter radius keeps the clipped band
++     inside it, so no sliver of light shows on transparent pixels. */
++  border-radius: 22%;
++  overflow: hidden;
++}
++
++.brand-sweep::after {
++  content: '';
++  position: absolute;
++  inset: 0;
++  /* Tight, bright pass: a white core with an accent shoulder either side, so it
++     reads on a white squircle and on a dark one without swapping colours. */
++  background-image: linear-gradient(
++    105deg,
++    transparent 46%,
++    rgb(255 255 255 / 0.9) 49%,
++    color-mix(in srgb, var(--ui-accent) 55%, white) 51%,
++    transparent 54%
++  );
++  background-position: 180% 0;
++  background-repeat: no-repeat;
++  background-size: 250% 100%;
++  pointer-events: none;
++  will-change: background-position, opacity;
++  animation: brand-sweep 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
++}
++
++/* 1.1s of travel, then a hold long enough that the repeat reads as a pass of
++   light rather than a shimmer. */
++@keyframes brand-sweep {
++  0% {
++    background-position: 180% 0;
++    opacity: 0;
++  }
++  4% {
++    opacity: 0.95;
++  }
++  28% {
++    background-position: -80% 0;
++    opacity: 0.95;
++  }
++  34%,
++  100% {
++    background-position: -80% 0;
++    opacity: 0;
++  }
++}
++
++/* SIDEBAR STATUS DOT — the busy beat. The row used to wrap a travelling arc
++   around its whole box; the dot now owns the motion: a halo that expands out of
++   the 6px dot and fades, plus a shallow breath on the dot itself so the beat is
++   legible even inside the 14px lead slot (which clips, `overflow-hidden` — the
++   halo is sized to land just inside it, not to fight it). */
++.session-dot-pulse {
++  position: relative;
++  animation: session-dot-beat 1.4s ease-in-out infinite;
++}
++
++.session-dot-pulse::before {
++  content: '';
++  position: absolute;
++  top: 50%;
++  left: 50%;
++  width: 100%;
++  height: 100%;
++  border-radius: 9999px;
++  background: var(--ui-accent);
++  transform: translate(-50%, -50%) scale(1);
++  animation: session-dot-pulse 1.4s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
++}
++
++@keyframes session-dot-pulse {
++  0% {
++    opacity: 0.75;
++    transform: translate(-50%, -50%) scale(1);
++  }
++  70%,
++  100% {
++    opacity: 0;
++    transform: translate(-50%, -50%) scale(2.1);
++  }
++}
++
++/* The dot BRIGHTENS rather than fades: at 6px on a dark sidebar a tint shift is
++   legible from across the room where an opacity dip just looks like a rendering
++   hiccup. The 12% scale pop is only there to catch the eye on the beat. */
++@keyframes session-dot-beat {
++  0%,
++  100% {
++    background-color: var(--ui-accent);
++    transform: scale(1);
++  }
++  40% {
++    background-color: color-mix(in srgb, var(--ui-accent) 40%, white);
++    transform: scale(1.12);
++  }
++}
++
+ @media (prefers-reduced-motion: reduce) {
+-  .arc-border::before {
++  .arc-border::before,
++  .brand-sweep::after,
++  .session-dot-pulse,
++  .session-dot-pulse::before {
+     animation: none;
+   }
+ }
+@@ -2076,6 +2188,11 @@ body.guest-pointer-lock :is(webview, iframe) {
+ [data-slot='composer-root'] {
+   width: 100%;
+   padding-inline: 5px;
++  /* Pill composer: the surface, input backing and edit affordances all use
++     rounded-[inherit], so one radius here reaches every layer. 26px > half the
++     single-line height, so a resting composer reads as a capsule and a grown
++     one as a soft card. */
++  border-radius: 1.625rem;
+ }
+ 
+ /* Popped-out (floating) composer: compact width + an even 5px transparent grab
+@@ -2154,12 +2271,15 @@ body.guest-pointer-lock :is(webview, iframe) {
+ }
+ 
+ [data-slot='composer-surface'] {
+-  border-color: var(--ui-stroke-secondary) !important;
++  /* Resting edge. Firmer than the generic secondary stroke so the composer
++     reads as a deliberate rounded panel, and scaled by the same ring-strength
++     knob the composer ring class uses (1 light / 1.3 dark). */
++  border-color: color-mix(in srgb, var(--ui-base) calc(22% * var(--composer-ring-strength)), transparent) !important;
+ }
+ 
+-/* The editor delegates focus chrome to its existing surface border. Restrict
+-   this to editor focus so a focused toolbar button does not get two indicators. */
+-[data-slot='composer-surface']:has([data-slot='composer-rich-input']:focus-visible),
++/* Prompt fields elsewhere still hand focus to the shared ring. The composer
++   surface does NOT: its edge is identity, not state, and it keeps the resting
++   hairline while focused — the caret is the focus cue there. */
+ .ui-prompt-input__container:has(> .ui-prompt-input-editor__input:focus-visible) {
+   border-color: var(--dt-composer-ring) !important;
+ }

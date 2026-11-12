@@ -1,0 +1,233 @@
+diff --git a/apps/desktop/DESIGN.md b/apps/desktop/DESIGN.md
+index 676a91c44e..13340f778f 100644
+--- a/apps/desktop/DESIGN.md
++++ b/apps/desktop/DESIGN.md
+@@ -91,6 +91,14 @@ Both are CSS vars in `src/styles.css` — tune in one place, everything inherits
+ Don't add per-overlay `shadow-[…]` or `border-(--ui-stroke-secondary)`
+ one-offs; if elevation needs to change, change the token.
+ 
++**The composer is a pill.** `[data-slot='composer-root']` owns a 26px radius and
++every layer inside it (surface, input backing, edit affordances) inherits via
++`rounded-[inherit]`; do not set a second radius on the surface. Its resting edge
++is the composer ring mixed at 22% through `--composer-ring-strength`, not the
++generic secondary stroke, and focus hands the same border to
++`--dt-composer-ring`. `--composer-width` sets both the reading column and the
++composer, so narrowing the column narrows the input in the same edit.
++
+ Menus and popovers use their own shared `shadow-md` +
+ `--ui-stroke-secondary` primitive treatment. Every floating list —
+ `DropdownMenu`, `Select`, and Popover + cmdk pickers
+@@ -323,11 +331,16 @@ Keep the renderer's startup fallback insets aligned with that position so the
+ adjacent toolbar and panel reservations do not jump when native state arrives.
+ Windows/Linux retain their previous toolbar startup fallback until native state arrives.
+ 
+-The left cluster shows sidebar, settings, layout editor, and HUD controls. Flip
+-and the right-sidebar toggle sit on the right; haptics remain in settings.
+-In Simple interface mode only sidebar, settings and the layout editor render,
+-and the reserved cluster width shrinks with them (`TITLEBAR_FIXED_TOOLS` is the
+-one table both the buttons and the width reservation read).
++The left cluster shows sidebar, settings, Command Center, and HUD controls. The
++right-sidebar toggle sits on the right; haptics remain in settings.
++Flipping which side the sidebar sits on and the layout editor are KEYBIND-only
++now: their titlebar buttons were removed (owner's call — two icons in the corner
++that the user never clicked, competing with the panes they control). The actions
++(`view.flipPanes`, the layout editor toggle/reset) and their bindings survive, so
++nothing became unreachable. In Simple interface mode only sidebar, settings and
++HUD render, and the reserved cluster width shrinks with them
++(`TITLEBAR_FIXED_TOOLS` is the one table both the buttons and the width
++reservation read).
+ Holding Cmd (Ctrl off macOS) reveals small slot numbers over the target strip's
+ status dots after 400ms, without changing tab widths. Hints follow the same
+ binding and hovered/focused-zone resolver as the number shortcuts.
+@@ -379,87 +392,110 @@ from their root base tokens; do not multiply the global tokens or nest CSS zoom.
+ 
+ ## Chat, tools & boot surfaces
+ 
+-- The transcript and composer are built on `@assistant-ui/react`. Extend the
+-  existing components under `src/components/assistant-ui` and
+-  `src/app/chat/composer`; do not fork a second markdown, message, tool-call, or
+-  approval renderer for one feature.
+-- **Inline widgets** — a tool result that renders as a panel the user reads or
+-  acts on (clarify, artifact card) wears `WIDGET_SHELL_CLASS`
+-  (`src/components/chat/widget-shell.ts`): shared radius, the
+-  `--ui-widget-surface-background` fill, no border. Its actions sit *outside*
+-  the panel, below it. Don't give one widget its own radius or fill.
+-- Bordered surfaces in the transcript (tables, fences, callouts, attachments)
+-  use `--ui-stroke-tertiary`. Not `border-border` — that's the app-wide
+-  default and reads too hot against the thread.
+-- Interactive directive chips in the composer expose their action on hover.
+-  The action stays visible for a 500ms grace period while the pointer crosses
+-  from the chip to the floating pill; leaving both dismisses it.
+-- A tool result may expose an inline action that opens a preview. It must not
+-  open the rail automatically.
+-- Tool rows reserve destructive red for explicit failures. Missing read paths and
+-  ambiguous exit-1 results use neutral notices, with details still available.
+-  Errors described inside returned data are not tool failures. Expanded failures
+-  show the actual explanation; supporting output keeps its normal text color.
+-- Nested transcript scrollers keep their height caps and hand vertical scrolling
+-  back to the thread at either edge (`overscroll-behavior-y: auto`), even when
+-  their content fits. Only the outer thread contains vertical overscroll;
+-  horizontal code/output boundaries may remain contained. Thinking previews
+-  follow new tokens only while near the bottom, preserving the user's reading
+-  position until they scroll back down.
+-- Composer status groups start collapsed except todos. Progress updates and queue
+-  pause/resume preserve the user's disclosure choice. Error banners meet the
+-  stack's top edge without a blank padding strip. File and preview links remain
+-  visible at the bottom of the stack, below the queue and all status groups.
+-  A centered ridge on the composer's top edge hides/reveals the entire stack,
+-  including the git row, with a short downward/upward drawer slide. Its choice
+-  persists per conversation and owner, not globally. Hidden sections stay
+-  mounted but inert so their disclosure choices survive; reduced motion is instant.
+-- Popping out a composer makes it the window's only visible composer. It keeps
+-  its viewport placement while hover or keyboard focus selects a chat pane;
+-  moving back into the editor retains that recipient. Drafts, attachments and
+-  queues stay session-owned. Docking restores the individual pane composers.
+-  In either placement, moving into a chat pane gives its editor typing focus
+-  immediately and preserves its caret. Layout-only hover events and delayed
+-  focus callbacks cannot replace that choice, and a live transcript selection
+-  is never cleared by focus-follow. Movement within the same pane
+-  must not flush React; deliberate Tab navigation and clicked controls still work.
+-  An inline message edit is a typing target of its own: opening one keeps focus
+-  in the edit editor, and neither its mount-time focus nor mouse movement while
+-  it is open hands the caret back to the pane composer.
+-  Active dictation or voice conversation pins the recipient until capture ends,
+-  keeping the microphone's stop controls and shortcut attached to its owner.
+-- Status-stack rows use `StatusRow` with a leading `dismiss` action, a state
+-  icon and optional trailing actions. `StatusDismissButton` owns the Codicon
+-  close button for previews, background tasks and queued prompts; do not swap
+-  it for a trash icon or a CSS glyph. Icons and controls align to the first text
+-  line, including messages with attachment metadata.
+-- `status-stack.css` owns the shared columns and `0.25rem` nesting step. Rows
+-  own their padding and full-width hover fill. `StatusControlRow` uses the same
+-  columns for goal/loop/heartbeat details; `StatusPendingIcon` supplies the
+-  dashed marker for tasks and criteria. The first row keeps its normal padding;
+-  the stack adds no extra top inset.
+-- Keep the rounded status card stationary, with the bounded scroll viewport
+-  inside it. The outer scroll boundary uses `overscroll-behavior-y: contain`;
+-  nested rosters and transcripts use `auto` so wheel input can hand off at an
+-  edge without trapping it or scrolling the chat behind the stack.
+-- Install, onboarding, connecting, boot failure, and reauthentication are
+-  distinct states with shared visual primitives. Preserve their recovery
+-  semantics when unifying appearance.
+-- Guide startup has a dedicated landing screen with the shared long-operation
+-  Loader and a localized startup label. It remains active until the guide's
+-  saved conversation is loaded. No greeting, composer, Skip setup, or statusbar
+-  appears early. Reduced motion uses a static BrandMark and the same label.
+-  On readiness, reveal the real conversation and fade controls in over 100ms.
+-  Never fabricate progress, delay readiness for motion, or replace a resumed
+-  conversation with a new greeting.
+-- Respect `AppShell` overlay ownership. Persistent terminal/content layers,
+-  route overlays, dialogs, and boot surfaces must not compete through ad-hoc
+-  z-index literals. Pick a rung of the ladder in `styles.css` instead —
+-  `--z-modal-backdrop` / `--z-modal` / `--z-modal-popover`, `--z-over-modal`
+-  (toasts, tooltips, command surfaces) and `--z-over-modal-content`,
+-  `--z-switcher-backdrop` / `--z-switcher`, then the boot chain
+-  `--z-connecting` → `--z-onboarding` → `--z-setup` → `--z-crash`. Plain
+-  `z-10`/`z-20` are still right for stacking *within* one component.
++- **The chrome frames the chat, the sidebar stands apart.** In Pebbl dark the
++  top band above the reading column, the collapsed rail on the right and the
++  statusbar's stretch under the chat paint with the editor surface (`#191919`),
++  the same as the transcript; the sidebar column, the band above it and the
++  statusbar segment under it keep the sidebar surface (`#252627`). The
++  statusbar is one full-width element, so it splits with a gradient at
++  `--sidebar-column-width` — published by `useSidebarColumnWidth` from a
++  ResizeObserver on `[data-slot='sidebar']` — and the seam follows the panel
++  when it is dragged. Zone headers decide by `sidebarGroup` (a zone holding
++  only side/tool panes keeps the sidebar surface); a collapsed rail decides by
++  `railSide`, and carries `--pane-tab-strip-bg` so the vertical tab inside it
++  matches. Don't bake a pixel here: the column is resizable. Chrome controls
++  hover neutrally (`--ui-control-hover-background: #2b2c2d`); the approval-mode
++  chip rests on that token, so an accent-tinted hover reads as a stray light
++  pill on the dark bar. Tooltips are inverted at the token level
++  (`bg-foreground`); the dark block repaints `.tooltip-bubble` and its arrow to
++  `#262728` with a `#3b3c3d` hairline instead of leaving a white card.
++- **The sidebar has no tab strip; Sessions / Bots are its own top-right
++  switches.** The Sessions/Bots panes are hide-only chrome, and `sideChromeOnly`
++  makes their zone stripless whatever mode a saved layout asks for, so the strip
++  tests became "no strip" tests. The switch itself renders **inside the sidebar
++  zone's own header band** (`tree-group`, `topEdge && sidebarGroup`) — that band
++  is chrome the shell already carves out of the macOS drag map — and it must be a
++  LAYOUT sibling of `data-window-drag-handle`, never an absolute box on top of
++  it. An overlapping drag box swallows hover and click on macOS whatever
++  `no-drag` the button asks for, and it comes back on the next launch once a
++  saved layout restores the header. The handle's `flex-1` shrinks around the
++  pair instead. Two 24px buttons with codicon glyphs (`comment-discussion`,
++  `robot`) call `revealTreePane` for `sessions` / `hermes-bots:pane`, both
++  resting at `text-foreground`. Glyph size is set by INK, not by box: the
++  codicons draw ~72% of their em box where `layout-sidebar-left` fills 86%, so
++  the switch uses 16px against the toggle's 13.9px to land the same 12px ink. Messaging was dropped
++  from the nav list, its rows use the project/session row typography (13px,
++  weight 400), and New session leads with a `+`.
++- **The boot splash hands off to the connecting overlay, mark to mark.**
++  `GatewayConnectingOverlay` used to spell CONNECTING in `--theme-primary` with a
++  decode cursor — the loudest thing on a screen the user cannot act on. It now
++  renders the same `BrandMark sweep` at the same 64px the splash uses, so the
++  logo is continuous from first paint until the gateway opens. No copy on that
++  screen; the slow-setup card and the boot-failure surface keep their words,
++  because those ask for something.
++- **The boot splash lives in `index.html`, not in React.** `#boot-splash` is
++  markup + inline CSS in the document (an 88px mark, same draw-on sweep on a
++  1.5s cycle) because the window paints before the bundle arrives — anything
++  that waits for mount is already too late, and a React splash would only ever
++  appear once there was nothing left to wait for. `dismissBootSplash()` in
++  `src/main.tsx` fades it out two frames after the shell mounts. Transparent
++  windows (`hud`/`overlay`/`quick`/`wake`) remove it immediately. No logo means
++  no branded boot screen existed before this: the BrandMark sweep only ever
++  reached the update/About surfaces.
++- **Loading surfaces carry the draw-on sweep.** `BrandMark sweep` runs a tight
++  white-core/accent-shoulder band across the mark once per 4s, clipped to the
++  icon's rounded box. Never mask it with the PNG: a `mask-image` pointing at a
++  `file://` asset resolves to an EMPTY mask in this renderer (the artwork paints
++  as `<img>`, the same URL as a mask comes back transparent — verified, the band
++  never drew), and inlining a data: URL costs a build step for a 12px highlight.
++  Loading surfaces only (boot/update/install) — a badge sitting in a list must
++  not be in motion.
++- **A nested row is name-only at REST, not while it is working.** The project
++  tree's nested rows render an empty 14px lead so titles align with the project
++  label; that also meant a busy session there had no status dot at all, so the
++  pulse was invisible wherever the tree lists sessions. The lead renders
++  `SessionStatusDot` when the state is active (`working`, `stalled`,
++  `needs-input`, `background`) — same 14px box, so nothing shifts — and stays
++  empty otherwise. `unread` deliberately stays out: a finished session keeps the
++  tree clean.
++- **Busy sessions pulse the status dot, not the row.** The row used to wrap a
++  travelling `.arc-border.arc-row` around its whole box. Busy is now
++  `.session-dot-pulse` on `SessionStatusDot` (`working` only): a halo expands out
++  of the 6px dot to 2.1× and fades while the dot itself brightens toward white
++  and pops 12%, every 1.4s. The brighten is the legible part — an opacity dip at
++  6px reads as a rendering hiccup. `stalled` stays hollow and still on purpose. The row background, border and title
++  stay still, and the motion is the same primitive the pane tabs and the session
++  switcher already render.
++- **No empty-slot reaction affordance.** A message never draws a reaction
++  control on its own: the ☺ appeared the moment the pointer crossed a turn, which
++  read as clutter under the sent bubble. `data-slot="aui_msg-reactions"` renders
++  only for a LANDED reaction (full strength, clickable to switch or retract).
++  Reacting lives on gestures — double-click tapback, right-click on a sent bubble.
++- **The sidebar's "open elsewhere" band means on screen, not merely owned.**
++  Session rows paint `--ui-row-active-background` when selected and the weaker
++  `--ui-row-open-background` for the other tiles in the workspace, so a
++  multi-pane layout shows every chat on screen. Parked tiles are excluded from
++  `$openStoredSessionIds`: they stay owned by a zone but unmounted, so a row the
++  user had closed out of sight no longer wears a highlight they never made.
++- **The minimal bottom bar exempts the approval chip.** `minimalBottomBar`
++  filters the statusbar down to the controls that carry state you cannot infer:
++  the approval-mode chip (whether the agent may act on its own) and the ⌘, which
++  now lives in the titlebar. Filtering on `command-center` alone emptied the bar
++  once that item moved out of it — never filter the approval chip, it is a safety
++  readout, not decoration. Guarded by `statusbar-visibility.test.tsx`.
++- **Zone chrome follows the active pane's surface.** `PaneChrome.surface`
++  (`'editor' | 'sidebar'`, absent = the zone default) tells the sidebar zone
++  what the active pane paints: Bots declares `editor`, so its titlebar band and
++  the statusbar strip under it paint the chat colour instead of staying
++  sidebar-grey. The statusbar reads it through `--sidebar-chrome-surface`, which
++  the sidebar's own `TreeGroup` publishes on `:root` (only that group writes it —
++  another group's cleanup would wipe it). Bots roster rows carry the same 10px
++  corner as bubbles and sidebar rows.
++- **One corner radius across floating surfaces.** 10px — chat bubbles, sidebar
++  row hover (`SidebarRowShell`), the Settings/Command Center card
++  (`OverlayView`), and every floating list (`menuSurfaceClass`, context menus).
++  The overlay's own nav rows (`overlay-split-layout`, `panel`) match the sidebar
++  rows; menu rows inside a list carry 6px so the highlight nests.
+ 
+ ## Iconography & brand
+ 

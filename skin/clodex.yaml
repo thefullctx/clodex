@@ -1,0 +1,105 @@
+name: clodex
+description: Clodex — near-black neutrals, one blue accent, grey hairlines (desktop + CLI)
+colors:
+  background: "#191919"
+  banner_border: "#2b2c2d"
+  banner_title: "#f1f1f1"
+  banner_accent: "#407bd9"
+  banner_dim: "#8b8b8b"
+  banner_text: "#f1f1f1"
+  ui_accent: "#407bd9"
+  ui_primary: "#f1f1f1"
+  ui_text: "#f1f1f1"
+  ui_label: "#f1f1f1"
+  ui_tool: "#407bd9"
+  ui_thinking: "#8b8b8b"
+  ui_border: "#2b2c2d"
+  ui_ok: "#3fb950"
+  ui_warn: "#d29922"
+  ui_error: "#e5484d"
+  prompt: "#f1f1f1"
+  input_rule: "#407bd9"
+  response_border: "#3b3c3d"
+  status_bar_bg: "#191919"
+  status_bar_text: "#8b8b8b"
+  status_bar_strong: "#f1f1f1"
+  status_bar_dim: "#6e6e6e"
+  status_bar_good: "#3fb950"
+  status_bar_warn: "#d29922"
+  status_bar_bad: "#e5484d"
+  status_bar_accent: "#407bd9"
+  command_accent: "#407bd9"
+  command_text: "#f1f1f1"
+  command_selected_bg: "#2e2f30"
+  command_selected_text: "#ffffff"
+  tool_text: "#407bd9"
+  session_border: "#2b2c2d"
+  session_label: "#8b8b8b"
+  session_active: "#407bd9"
+  context_bar_filled: "#407bd9"
+  danger: "#e5484d"
+# The desktop half of the look. Tokens are pinned rather than mixed: the stock
+# palette tints every hairline toward the accent and mixes the chrome darker
+# than the sampled hexes, so the surface values are stated outright.
+customCSS: |
+  :root[data-hermes-mode='light'] {
+    --ui-bg-chrome: #ffffff;
+    --ui-bg-sidebar: #ececec;
+    --ui-bg-editor: #ffffff;
+    --ui-stroke-primary: #d4d4d4;
+    --ui-stroke-secondary: #e0e0e0;
+    --ui-stroke-tertiary: #ececec;
+    --ui-row-active-background: #d4d4d4;
+    --ui-row-hover-background: #e4e4e4;
+    --ui-control-hover-background: #e0e0e0;
+    --dt-user-bubble: #f3f3f3;
+    --ui-text-secondary: #191919;
+    --ui-text-tertiary: #191919;
+    --ui-text-quaternary: #191919;
+  }
+  :root[data-hermes-mode='light'] [data-slot='composer-root'] {
+    --composer-fill: #ffffff;
+  }
+  :root[data-hermes-mode='light'] [data-slot='statusbar'] {
+    background-image: linear-gradient(
+      to right,
+      var(--sidebar-chrome-surface, var(--ui-sidebar-surface-background)) 0 var(--sidebar-column-width, 0px),
+      var(--ui-editor-surface-background) var(--sidebar-column-width, 0px)
+    );
+  }
+  :root[data-hermes-mode='dark'] {
+    --ui-bg-chrome: #191919;
+    --ui-bg-sidebar: #252627;
+    --ui-bg-editor: #191919;
+    --ui-stroke-primary: #404040;
+    --ui-stroke-secondary: #2b2c2d;
+    --ui-stroke-tertiary: #222222;
+    --ui-row-active-background: #454647;
+    --ui-row-hover-background: #2e2f30;
+    --ui-control-hover-background: #2b2c2d;
+    --composer-ring-strength: 0.4;
+    --dt-user-bubble: #262728;
+  }
+  :root[data-hermes-mode='dark'] [data-slot='composer-root'] {
+    --composer-fill: #303030;
+  }
+  :root[data-hermes-mode='dark'] .tooltip-bubble {
+    background: #262728;
+    color: #f1f1f1;
+    box-shadow:
+      inset 0 0 0 1px #3b3c3d,
+      0 8px 24px rgb(0 0 0 / 0.45);
+  }
+  :root[data-hermes-mode='dark'] .tooltip-bubble [data-slot='tooltip-arrow'] {
+    fill: #262728;
+  }
+  :root[data-hermes-mode='dark'] [data-slot='code-card'] {
+    box-shadow: inset 0 0 0 1px #222222;
+  }
+  :root[data-hermes-mode='dark'] [data-slot='statusbar'] {
+    background-image: linear-gradient(
+      to right,
+      var(--sidebar-chrome-surface, var(--ui-sidebar-surface-background)) 0 var(--sidebar-column-width, 0px),
+      var(--ui-editor-surface-background) var(--sidebar-column-width, 0px)
+    );
+  }

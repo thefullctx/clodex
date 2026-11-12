@@ -1,0 +1,207 @@
+diff --git a/apps/desktop/src/themes/presets.ts b/apps/desktop/src/themes/presets.ts
+index 32796c58f5..b24e4f7264 100644
+--- a/apps/desktop/src/themes/presets.ts
++++ b/apps/desktop/src/themes/presets.ts
+@@ -418,6 +418,111 @@ export const monoTheme: DesktopTheme = {
+   ...THEME_PRESET_PALETTES.mono
+ }
+ 
++/**
++ * Pebbl — the neutral near-black palette sampled from a reference app.
++ *
++ * The seed chain tints its way to a surface (chrome 74%, editor 38% of the
++ * seed in dark), so the exact sampled hexes cannot come from the seeds alone.
++ * The customCSS below pins the final tokens — it is the theme's palette lock,
++ * not a one-off hack, and it is dark-only: light keeps the preset palette.
++ */
++export const clodexTheme: DesktopTheme = {
++  name: 'clodex',
++  label: 'Clodex',
++  description: 'Claude warmth, Codex neutrals — one blue accent',
++  ...THEME_PRESET_PALETTES.clodex,
++  customCSS: `
++    /* Light: sampled from the reference — white canvas, a soft grey sidebar,
++       pure-grey hairlines, and no blue wash anywhere. The stock light tokens
++       tint every edge toward the accent, so the palette is pinned here. */
++    :root[data-hermes-mode='light'] {
++      --ui-bg-chrome: #ffffff;
++      --ui-bg-sidebar: #ececec;
++      --ui-bg-editor: #ffffff;
++      --ui-stroke-primary: #d4d4d4;
++      --ui-stroke-secondary: #e0e0e0;
++      --ui-stroke-tertiary: #ececec;
++      --ui-row-active-background: #d4d4d4;
++      --ui-row-hover-background: #e4e4e4;
++      --ui-control-hover-background: #e0e0e0;
++    }
++    :root[data-hermes-mode='light'] [data-slot='composer-root'] {
++      --composer-fill: #ffffff;
++    }
++    /* Every label in the sidebar reads as ink: hierarchy comes from weight and
++       the selected row, not from washing the text out to grey. */
++    :root[data-hermes-mode='light'] [data-slot='sidebar'] {
++      --ui-text-secondary: #191919;
++      --ui-text-tertiary: #191919;
++      --ui-text-quaternary: #191919;
++    }
++    /* The statusbar's stretch under the chat belongs to the chat surface, not
++       the sidebar: split at the live sidebar column, same as dark. */
++    :root[data-hermes-mode='light'] [data-slot='statusbar'] {
++      background-image: linear-gradient(
++        to right,
++        var(--sidebar-chrome-surface, var(--ui-sidebar-surface-background)) 0 var(--sidebar-column-width, 0px),
++        var(--ui-editor-surface-background) var(--sidebar-column-width, 0px)
++      );
++    }
++    /* The bubble seed mixes away in light mode (--theme-mix-bubble is 0%),
++       so the surface itself is pinned to the sampled grey. */
++    :root[data-hermes-mode='light'] {
++      --dt-user-bubble: #f3f3f3;
++    }
++    :root[data-hermes-mode='dark'] {
++      --ui-bg-chrome: #191919;
++      --ui-bg-sidebar: #252627;
++      --ui-bg-editor: #191919;
++      /* Neutral strokes: the stock tokens tint every hairline toward the
++         accent, and this palette keeps its borders pure grey. */
++      --ui-stroke-primary: #404040;
++      --ui-stroke-secondary: #2b2c2d;
++      --ui-stroke-tertiary: #222222;
++      --ui-row-active-background: #454647;
++      --ui-row-hover-background: #2e2f30;
++      /* Chrome controls mix their hover out of the accent, which reads as a
++         blue-grey on near-black; this palette keeps every control state
++         neutral. Also repaints the approval-mode chip, which rests on it. */
++      --ui-control-hover-background: #2b2c2d;
++      /* White hairline over the #303030 composer: 22% x 0.4 ≈ #404040. */
++      --composer-ring-strength: 0.4;
++    }
++    /* The composer derives from --dt-card, which the editor pin holds at the
++       transcript colour; give the input its own lighter fill. */
++    :root[data-hermes-mode='dark'] [data-slot='composer-root'] {
++      --composer-fill: #303030;
++    }
++    /* Tooltips are inverted at the token level (bg-foreground): white on
++       near-black. Keep the floating-card read, lose the glare. */
++    :root[data-hermes-mode='dark'] .tooltip-bubble {
++      background: #262728;
++      color: #f1f1f1;
++      box-shadow:
++        inset 0 0 0 1px #3b3c3d,
++        0 8px 24px rgb(0 0 0 / 0.45);
++    }
++    :root[data-hermes-mode='dark'] .tooltip-bubble [data-slot='tooltip-arrow'] {
++      fill: #262728;
++    }
++    /* Reference code blocks are the page colour with a hairline, not a card. */
++    :root[data-hermes-mode='dark'] [data-slot='code-card'] {
++      box-shadow: inset 0 0 0 1px #222222;
++    }
++    /* The statusbar is one full-width band, but its left stretch sits under the
++       sidebar and belongs to the sidebar surface; the rest frames the chat.
++       Split at the live sidebar column (useSidebarColumnWidth publishes it) so
++       the seam tracks the panel instead of a baked pixel. */
++    :root[data-hermes-mode='dark'] [data-slot='statusbar'] {
++      background-image: linear-gradient(
++        to right,
++        var(--sidebar-chrome-surface, var(--ui-sidebar-surface-background)) 0 var(--sidebar-column-width, 0px),
++        var(--ui-editor-surface-background) var(--sidebar-column-width, 0px)
++      );
++    }
++  `
++}
++
+ /** Neon green on black. Matches the CLI cyberpunk skin and dashboard theme. */
+ export const cyberpunkTheme: DesktopTheme = {
+   name: 'cyberpunk',
+@@ -452,6 +557,7 @@ export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
+   midnight: midnightTheme,
+   ember: emberTheme,
+   mono: monoTheme,
++  clodex: clodexTheme,
+   slate: slateTheme,
+   cyberpunk: cyberpunkTheme
+ }
+diff --git a/apps/shared/src/theme-presets.ts b/apps/shared/src/theme-presets.ts
+index bc0a76b73a..faeab913ef 100644
+--- a/apps/shared/src/theme-presets.ts
++++ b/apps/shared/src/theme-presets.ts
+@@ -466,6 +466,78 @@ export const THEME_PRESET_PALETTES = {
+       userBubbleBorder: '#4a2010'
+     }
+   },
++  /**
++   * Pebbl — sampled from a reference dark UI: one neutral ramp (bg #191919,
++   * sidebar #252627, composer #303030, selection #454647) and a single blue
++   * accent (#407bd9). The dark seeds are pre-mixed on purpose: applyTheme
++   * renders chrome at 74% and the editor at 38% of the seed over its own
++   * neutrals, and the theme's customCSS pins those results back to the exact
++   * sampled hexes. Do not "simplify" the seeds to the rendered values.
++   */
++  clodex: {
++    // Light is its own sampled palette (the Codex-style reference): pure white
++    // canvas, a soft #ececec sidebar, grey hairlines, neutral text, and a
++    // single muted blue for the accent. The theme's light customCSS pins the
++    // mixed surfaces back to these hexes.
++    colors: {
++      background: '#ffffff',
++      foreground: '#191919',
++      card: '#ffffff',
++      cardForeground: '#191919',
++      muted: '#f0f0f0',
++      mutedForeground: '#666666',
++      popover: '#ffffff',
++      popoverForeground: '#191919',
++      primary: '#3c78d2',
++      primaryForeground: '#ffffff',
++      secondary: '#e8e8e8',
++      secondaryForeground: '#191919',
++      accent: '#e6e6e6',
++      accentForeground: '#191919',
++      border: '#e0e0e0',
++      input: '#dcdcdc',
++      ring: '#3c78d2',
++      midground: '#3c78d2',
++      midgroundForeground: '#ffffff',
++      composerRing: '#d0d0d0',
++      destructive: '#cf222e',
++      destructiveForeground: '#ffffff',
++      sidebarBackground: '#ececec',
++      sidebarBorder: '#e0e0e0',
++      userBubble: '#f3f3f3',
++      userBubbleBorder: '#e5e5e5'
++    },
++    darkColors: {
++      background: '#232323', // 74% chrome mix → #1e1e1e titlebar
++      foreground: '#ffffff', // text is 94% foreground → #f1f1f1
++      card: '#1e1e1e', // editor/bg → #191919
++      cardForeground: '#f1f1f1',
++      muted: '#2b2c2d',
++      mutedForeground: '#8b8b8b',
++      popover: '#4a4a4a', // elevated mix → ~#2e2e2e
++      popoverForeground: '#f1f1f1',
++      primary: '#407bd9',
++      primaryForeground: '#ffffff',
++      secondary: '#2a2b2c',
++      secondaryForeground: '#f1f1f1',
++      accent: '#243040',
++      accentForeground: '#f1f1f1',
++      border: '#2b2c2d',
++      input: '#404040',
++      ring: '#407bd9',
++      midground: '#407bd9',
++      midgroundForeground: '#ffffff',
++      composerRing: '#407bd9',
++      destructive: '#e5484d',
++      destructiveForeground: '#ffffff',
++      sidebarBackground: '#252627', // solid: sidebar mixes at 100%
++      sidebarBorder: '#3b3c3d',
++      // 46% seed over the dark neutral renders ≈ #262728 — above the
++      // transcript's #191919, a step below the composer's #303030.
++      userBubble: '#393a3b',
++      userBubbleBorder: '#3b3c3d'
++    }
++  },
+   mono: {
+     colors: {
+       background: '#0e0e0e',

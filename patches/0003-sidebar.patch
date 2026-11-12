@@ -1,0 +1,1175 @@
+diff --git a/apps/desktop/src/app/chat/session-status-dot.tsx b/apps/desktop/src/app/chat/session-status-dot.tsx
+index 3e278556b1..b6947bcfcb 100644
+--- a/apps/desktop/src/app/chat/session-status-dot.tsx
++++ b/apps/desktop/src/app/chat/session-status-dot.tsx
+@@ -138,6 +138,12 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
+   )
+ 
+   const variant = DOT_VARIANTS[dotState]
++  // The row used to wrap a travelling arc around itself while a turn ran. The
++  // dot beats instead: the row stays flat, the motion is 6px wide, and it is the
++  // same primitive the pane tabs and the switcher already render. `stalled` is
++  // hollow on purpose (working, but nothing arriving) — a fill flash would
++  // contradict it, so it stays still.
++  const pulses = dotState === 'working'
+ 
+   return (
+     <span className={cn('flex items-center gap-0.5', className)}>
+@@ -154,7 +160,7 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
+       ) : (
+         <span
+           aria-label={variant.ariaLabel?.(r)}
+-          className={variant.className}
++          className={cn(variant.className, pulses && 'session-dot-pulse')}
+           role={variant.role}
+           title={variant.title?.(r)}
+         />
+diff --git a/apps/desktop/src/app/chat/sidebar/account-menu.tsx b/apps/desktop/src/app/chat/sidebar/account-menu.tsx
+new file mode 100644
+index 0000000000..99cb37ee17
+--- /dev/null
++++ b/apps/desktop/src/app/chat/sidebar/account-menu.tsx
+@@ -0,0 +1,105 @@
++import { useStore } from '@nanostores/react'
++import { ChartColumn, LogOut, PawPrint, Settings, User } from 'lucide-react'
++import { useNavigate } from 'react-router'
++
++import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
++import avatarUrl from '@/assets/account/avatar.jpg'
++import {
++  DropdownMenu,
++  DropdownMenuContent,
++  DropdownMenuItem,
++  DropdownMenuLabel,
++  DropdownMenuSeparator,
++  DropdownMenuTrigger
++} from '@/components/ui/dropdown-menu'
++import { cn } from '@/lib/utils'
++import { $petGallery, loadPetGallery, setPetEnabled } from '@/store/pet-gallery'
++import { $activeGatewayProfile } from '@/store/profile'
++
++import { COMMAND_CENTER_ROUTE, SETTINGS_ROUTE } from '../../routes'
++
++// The account label follows the active gateway profile instead of a hardcoded
++// handle — a shared build must not name its author.
++const ROW = 'gap-2.5 rounded-md px-2 py-1.5 text-[0.8125rem]'
++
++/**
++ * The account door, bottom-left of the sidebar: avatar, and a menu with the
++ * app's account-level verbs. Every destination is a real surface — Billing for
++ * the account/plan, the Command Center's usage tab for spend, Settings for the
++ * rest, and the Gateway page for the only Sign out this build has.
++ *
++ * "Show Pet" is a live toggle, not a link: it flips the installed pet through
++ * the same action Settings uses.
++ */
++export function AccountMenu() {
++  const navigate = useNavigate()
++  const { requestGateway } = useGatewayRequest()
++  const gallery = useStore($petGallery)
++  const profile = useStore($activeGatewayProfile)
++  const accountName = (profile || '').trim() || 'Local'
++  const petOn = gallery?.enabled ?? false
++
++  const togglePet = async () => {
++    if (!$petGallery.get()) {
++      await loadPetGallery(requestGateway)
++    }
++
++    await setPetEnabled(requestGateway, !petOn, {
++      noneAvailable: 'No pet installed — pick one in Settings → Appearance',
++      fallback: 'Could not change the pet'
++    }).catch(() => false)
++  }
++
++  return (
++    <DropdownMenu>
++      <DropdownMenuTrigger asChild>
++        <button
++          aria-label="Account menu"
++          className={cn(
++            'group/account grid size-8 place-items-center rounded-full p-0 transition',
++            'hover:ring-2 hover:ring-(--ui-control-hover-background) data-[state=open]:ring-2 data-[state=open]:ring-(--ui-stroke-primary)'
++          )}
++          type="button"
++        >
++          <img
++            alt=""
++            className="size-8 rounded-full object-cover ring-1 ring-(--ui-stroke-secondary)"
++            src={avatarUrl}
++          />
++        </button>
++      </DropdownMenuTrigger>
++      <DropdownMenuContent align="start" className="w-56" side="top" sideOffset={8}>
++        <DropdownMenuLabel className="flex items-center gap-2.5 py-1.5">
++          <img alt="" className="size-7 rounded-full object-cover ring-1 ring-(--ui-stroke-secondary)" src={avatarUrl} />
++          <span className="flex min-w-0 flex-col">
++            <span className="truncate text-[0.8125rem] font-medium text-foreground">{accountName}</span>
++            <span className="truncate text-[0.6875rem] text-(--ui-text-tertiary)">Personal</span>
++          </span>
++        </DropdownMenuLabel>
++        <DropdownMenuSeparator />
++        <DropdownMenuItem className={ROW} onSelect={() => navigate(`${SETTINGS_ROUTE}?tab=billing`)}>
++          <User className="size-3.5 text-(--ui-text-tertiary)" />
++          Profile
++        </DropdownMenuItem>
++        <DropdownMenuItem className={ROW} onSelect={() => void togglePet()}>
++          <PawPrint className="size-3.5 text-(--ui-text-tertiary)" />
++          Show Pet
++          <span className="ml-auto text-[0.6875rem] text-(--ui-text-tertiary)">{petOn ? 'On' : 'Off'}</span>
++        </DropdownMenuItem>
++        <DropdownMenuItem className={ROW} onSelect={() => navigate(`${COMMAND_CENTER_ROUTE}?section=usage`)}>
++          <ChartColumn className="size-3.5 text-(--ui-text-tertiary)" />
++          Usage
++        </DropdownMenuItem>
++        <DropdownMenuItem className={ROW} onSelect={() => navigate(SETTINGS_ROUTE)}>
++          <Settings className="size-3.5 text-(--ui-text-tertiary)" />
++          Settings
++        </DropdownMenuItem>
++        <DropdownMenuSeparator />
++        <DropdownMenuItem className={ROW} onSelect={() => navigate(`${SETTINGS_ROUTE}?tab=gateway`)}>
++          <LogOut className="size-3.5 text-(--ui-text-tertiary)" />
++          Log out
++        </DropdownMenuItem>
++      </DropdownMenuContent>
++    </DropdownMenu>
++  )
++}
+diff --git a/apps/desktop/src/app/chat/sidebar/chat-sidebar.integration.test.tsx b/apps/desktop/src/app/chat/sidebar/chat-sidebar.integration.test.tsx
+index f692cc8db1..8a57fbcbdd 100644
+--- a/apps/desktop/src/app/chat/sidebar/chat-sidebar.integration.test.tsx
++++ b/apps/desktop/src/app/chat/sidebar/chat-sidebar.integration.test.tsx
+@@ -158,7 +158,6 @@ describe('ChatSidebar navigation activity', () => {
+ 
+     for (const [pathname, currentView, label] of [
+       ['/capabilities', 'capabilities', 'Capabilities'],
+-      ['/messaging', 'messaging', 'Messaging'],
+       ['/artifacts', 'artifacts', 'Artifacts'],
+       ['/cron', 'cron', 'Scheduled jobs']
+     ] as const) {
+@@ -234,7 +233,9 @@ describe('ChatSidebar cold-start load failure', () => {
+ })
+ 
+ // #146510: see SidebarPinnedEmptyState.
+-describe('ChatSidebar pinned empty state under filters', () => {
++// Pins no longer get a section of their own: there is no pinned empty state to
++// name a filter, and the "shift-click to pin" hint is gone from the sidebar.
++describe('ChatSidebar has no Pinned section', () => {
+   beforeEach(() => {
+     $sessions.set(sessionRows)
+     $sessionsLoading.set(false)
+@@ -242,49 +243,17 @@ describe('ChatSidebar pinned empty state under filters', () => {
+ 
+   afterEach(() => {
+     cleanup()
+-    $sidebarStatusFilter.set([])
+-    $sidebarProjectFilter.set([])
+-    $sidebarShowArchived.set(false)
+     $pinnedSessionIds.set([])
+     $sessions.set([])
+     $sessionsLoading.set(true)
+   })
+ 
+-  it('names the filter when it hides every pin', () => {
+-    $sessions.set([{ ...sessionRows[0], pinned: true }, sessionRows[1]])
++  it('never renders the pin hint', () => {
+     $pinnedSessionIds.set(['tile-one'])
+-    $sidebarStatusFilter.set(['working'])
+ 
+     renderSidebar('/', 'chat')
+ 
+-    expect(screen.queryByText('Tile one')).toBeNull()
+     expect(screen.queryByText('Shift-click a chat to pin')).toBeNull()
+-    // Pinned and Sessions both report the filter.
+-    expect(screen.getAllByText('No sessions match these filters')).toHaveLength(2)
+-  })
+-
+-  it('keeps the pin hint when nothing is pinned and no filter is on', () => {
+-    renderSidebar('/', 'chat')
+-
+-    expect(screen.getByText('Shift-click a chat to pin')).toBeTruthy()
+-    expect(screen.queryByText('No sessions match these filters')).toBeNull()
+-  })
+-
+-  it('keeps the pin hint when the only filter is a project id the tree does not resolve', () => {
+-    $sidebarProjectFilter.set(['/repos/gone'])
+-
+-    renderSidebar('/', 'chat')
+-
+-    expect(screen.getByText('Shift-click a chat to pin')).toBeTruthy()
+-  })
+-
+-  it('drops the pin hint in the Archived view when Pinned is empty', () => {
+-    $sidebarShowArchived.set(true)
+-
+-    renderSidebar('/', 'chat')
+-
+-    expect(screen.queryByText('Shift-click a chat to pin')).toBeNull()
+-    expect(screen.getAllByText('No sessions match these filters')).toHaveLength(2)
+   })
+ })
+ 
+diff --git a/apps/desktop/src/app/chat/sidebar/chrome.tsx b/apps/desktop/src/app/chat/sidebar/chrome.tsx
+index 8e0d77d13d..4af1273092 100644
+--- a/apps/desktop/src/app/chat/sidebar/chrome.tsx
++++ b/apps/desktop/src/app/chat/sidebar/chrome.tsx
+@@ -189,7 +189,7 @@ export function SidebarRowShell({
+       className={cn(
+         SIDEBAR_ROW_MIN_H,
+         SIDEBAR_ROW_PAD_TRAIL,
+-        'grid grid-cols-[minmax(0,1fr)_auto] items-stretch rounded-md',
++        'grid grid-cols-[minmax(0,1fr)_auto] items-stretch rounded-[10px]',
+         className
+       )}
+       {...props}
+diff --git a/apps/desktop/src/app/chat/sidebar/index.tsx b/apps/desktop/src/app/chat/sidebar/index.tsx
+index 187019389a..b1cdca5eb2 100644
+--- a/apps/desktop/src/app/chat/sidebar/index.tsx
++++ b/apps/desktop/src/app/chat/sidebar/index.tsx
+@@ -38,14 +38,12 @@ import { $bindings } from '@/store/keybinds'
+ import {
+   $dismissedAutoProjectIds,
+   $panesFlipped,
+-  $pinnedSessionIds,
+   $sidebarCardRows,
+   $sidebarCronOpen,
+   $sidebarFiltersActive,
+   $sidebarGrouping,
+   $sidebarMessagingOpenIds,
+   $sidebarOrdering,
+-  $sidebarPinsOpen,
+   $sidebarPrDataWanted,
+   $sidebarPrFilter,
+   $sidebarProfileFilter,
+@@ -64,7 +62,6 @@ import {
+   SESSION_SEARCH_FOCUS_EVENT,
+   setPinnedSessionOrder,
+   setSidebarCronOpen,
+-  setSidebarPinsOpen,
+   setSidebarProjectOrderIds,
+   setSidebarRecentsOpen,
+   setSidebarSessionOrderIds,
+@@ -72,9 +69,9 @@ import {
+   setSidebarWorkspaceOrderIds,
+   setSidebarWorkspaceParentOrderIds,
+   SIDEBAR_SESSIONS_PAGE_SIZE,
+-  toggleSidebarMessagingOpen,
+-  unpinSession
++  toggleSidebarMessagingOpen
+ } from '@/store/layout'
++import { $minimalBottomBar } from '@/store/minimal-chrome-prefs'
+ import { notifyError } from '@/store/notifications'
+ import {
+   $newChatProfile,
+@@ -144,13 +141,13 @@ import {
+   ARTIFACTS_ROUTE,
+   CAPABILITIES_ROUTE,
+   CRON_ROUTE,
+-  MESSAGING_ROUTE,
+   SIDEBAR_NAV_AREA,
+   type SidebarNavContribution
+ } from '../../routes'
+ import type { SidebarNavItem } from '../../types'
+ import { type NewSessionSplitHandler, startNewSessionDrag } from '../new-session-drag'
+ 
++import { AccountMenu } from './account-menu'
+ import { SidebarSectionAddButton } from './chrome'
+ import { SidebarCronJobsSection } from './cron-jobs-section'
+ import { SidebarFilterMenu } from './filter-menu'
+@@ -186,11 +183,10 @@ import {
+   hasSessionArea,
+   SidebarBlankState,
+   SidebarLoadErrorState,
+-  SidebarPinnedEmptyState,
+   SidebarSessionSkeletons,
+   SidebarStorageCorruptNotice
+ } from './section-states'
+-import { buildSessionByAnyId, resolvePinnedSessions } from './session-index'
++import { buildSessionByAnyId } from './session-index'
+ import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section'
+ import { CONTEXT_SPLIT_KIT, SplitSubmenu } from './split-submenu'
+ import { useEnteredProjectSessions } from './use-entered-project-sessions'
+@@ -213,7 +209,7 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
+   {
+     id: 'new-session',
+     label: '',
+-    icon: props => <Codicon name="robot" {...props} />,
++    icon: props => <Codicon name="add" {...props} />,
+     action: 'new-session',
+     keybindActionId: 'session.new'
+   },
+@@ -224,13 +220,6 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
+     route: CAPABILITIES_ROUTE,
+     keybindActionId: 'nav.capabilities'
+   },
+-  {
+-    id: 'messaging',
+-    label: '',
+-    icon: props => <Codicon name="comment" {...props} />,
+-    route: MESSAGING_ROUTE,
+-    keybindActionId: 'nav.messaging'
+-  },
+   // Artifacts and Scheduled jobs are outputs of running Hermes the developer
+   // way; Capabilities and Messaging are how anyone sets it up.
+   {
+@@ -476,9 +465,7 @@ export function ChatSidebar({
+   const sortOrderIds = useStore($sidebarSessionRankIds)
+   const agentsGrouped = grouping === 'project'
+   const showAllSessions = useStore($sidebarShowAllSessions)
+-  const pinnedSessionIds = useStore($pinnedSessionIds)
+   const unconfirmedPinWrites = useStore($unconfirmedPinWrites)
+-  const pinsOpen = useStore($sidebarPinsOpen)
+   const agentsOpen = useStore($sidebarRecentsOpen)
+   const cronOpen = useStore($sidebarCronOpen)
+   // The sidebar highlight tracks the FOCUSED session — the interacted tile's
+@@ -588,6 +575,9 @@ export function ChatSidebar({
+ 
+   const activeSidebarSessionId = currentView === 'chat' ? selectedSessionId : null
+   const profileRailVisible = useStore($profileRailVisible)
++  // Minimal bottom bar: the profile rail is the bulk of what sits under the
++  // session list, so it goes away with it.
++  const minimalBottomBar = useStore($minimalBottomBar)
+ 
+   const dndSensors = useSensors(
+     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+@@ -690,58 +680,12 @@ export function ChatSidebar({
+     [visibleSessions, visibleCronSessions, visibleMessagingSessions]
+   )
+ 
+-  // Local pin ids first (hand-picked order), then server-flagged pins the
+-  // local set doesn't know about — a backend `pinned=1` row must never be
+-  // invisible just because localStorage is cold or was clobbered (#85969) —
+-  // minus the rows whose flag our own in-flight pin write already contradicts.
+-  const pinnedSessions = useMemo(
+-    () =>
+-      resolvePinnedSessions(
+-        pinnedSessionIds,
+-        sessionByAnyId,
+-        [...visibleSessions, ...cronSessions, ...messagingSessions],
+-        unconfirmedPinWrites
+-      ),
+-    [pinnedSessionIds, sessionByAnyId, visibleSessions, cronSessions, messagingSessions, unconfirmedPinWrites]
+-  )
+-
+-  // Every id a pin is reachable under: the raw stored ids, plus BOTH identities
+-  // of each session we resolved one to. A pin is stored on the durable lineage
+-  // root, but the lists that must filter it out are fed from three independent
+-  // fetches (recents, the messaging slice, the backend project tree) and each
+-  // can surface the same conversation under either its live tip or its root.
+-  // Comparing one identity against the other is how a pinned session ended up
+-  // rendered twice — once in Pinned, once in its project group.
+-  const pinnedIdentitySet = useMemo(() => {
+-    const ids = new Set(pinnedSessionIds)
+-
+-    for (const session of pinnedSessions) {
+-      ids.add(session.id)
+-
+-      if (session._lineage_root_id) {
+-        ids.add(session._lineage_root_id)
+-      }
+-    }
+-
+-    return ids
+-  }, [pinnedSessionIds, pinnedSessions])
+-
+-  // A pinned session belongs to the Pinned section and nowhere else, so every
+-  // other list filters it out. Match on either identity the row carries — a
+-  // backend snapshot can surface either side of a compression tip rotation.
+-  const isPinnedSession = useCallback(
+-    (session: SessionInfo) =>
+-      pinnedIdentitySet.has(session.id) ||
+-      (session._lineage_root_id != null && pinnedIdentitySet.has(session._lineage_root_id)),
+-    [pinnedIdentitySet]
+-  )
++  // Pins no longer render in their own section — a pinned chat sits in its
++  // project lane like any other row, so nothing here filters on pin state.
+ 
+-  // What the project tree drops: pins (they live in their own section) plus
+-  // anything the active filters exclude, so filtering works the same whether
+-  // you're looking at the flat list or the lanes.
+   const isHiddenFromProjects = useCallback(
+-    (session: SessionInfo) => isPinnedSession(session) || (filtersNarrow && !sessionMatchesFilters(session)),
+-    [isPinnedSession, filtersNarrow, sessionMatchesFilters]
++    (session: SessionInfo) => filtersNarrow && !sessionMatchesFilters(session),
++    [filtersNarrow, sessionMatchesFilters]
+   )
+ 
+   const { searchPending, serverMatches } = useServerSessionSearch(trimmedQuery, profileScope)
+@@ -751,10 +695,9 @@ export function ChatSidebar({
+     [sortedSessions, trimmedQuery, serverMatches, sessionByAnyId, searchPending]
+   )
+ 
+-  const unpinnedAgentSessions = useMemo(
+-    () => sortedSessions.filter(s => !isPinnedSession(s)),
+-    [sortedSessions, isPinnedSession]
+-  )
++  // Pinned rows are no longer lifted out of the lists — there is no Pinned
++  // section to lift them into — so the agent list is the full sorted set.
++  const unpinnedAgentSessions = useMemo(() => sortedSessions, [sortedSessions])
+ 
+   useEffect(() => {
+     const next = resolveManualSessionOrderIds(
+@@ -1323,10 +1266,6 @@ export function ChatSidebar({
+     }
+ 
+     const bySource = new Map<string, SessionInfo[]>()
+-    // Rows this platform owns that the Pinned section is showing instead. The
+-    // backend's per-platform total counts them, so discount it or "load more"
+-    // promises rows that will never appear.
+-    const pinnedBySource = new Map<string, number>()
+ 
+     for (const session of visibleMessagingSessions) {
+       const sourceId = normalizeSessionSource(session.source)
+@@ -1335,12 +1274,6 @@ export function ChatSidebar({
+         continue
+       }
+ 
+-      if (isPinnedSession(session)) {
+-        pinnedBySource.set(sourceId, (pinnedBySource.get(sourceId) ?? 0) + 1)
+-
+-        continue
+-      }
+-
+       const list = bySource.get(sourceId) ?? []
+       list.push(session)
+       bySource.set(sourceId, list)
+@@ -1350,14 +1283,13 @@ export function ChatSidebar({
+       .map(([sourceId, list]) => {
+         const ordered = [...list].sort((a, b) => sessionTime(b) - sessionTime(a))
+         const known = messagingPlatformTotals[messagingTotalsKey(messagingProfile, sourceId)]
+-        const unpinnedKnown = known == null ? null : Math.max(0, known - (pinnedBySource.get(sourceId) ?? 0))
+-        const total = Math.max(ordered.length, unpinnedKnown ?? 0)
++        const total = Math.max(ordered.length, known ?? 0)
+ 
+         return {
+           // Known exact total → more exist iff total exceeds loaded; otherwise
+           // the seed fetch was capped, so assume more until a per-platform load
+           // resolves the count.
+-          hasMore: unpinnedKnown != null ? unpinnedKnown > ordered.length : messagingTruncated,
++          hasMore: known != null ? known > ordered.length : messagingTruncated,
+           label: sessionSourceLabel(sourceId) ?? sourceId,
+           sessions: ordered,
+           sourceId,
+@@ -1365,7 +1297,7 @@ export function ChatSidebar({
+         }
+       })
+       .sort((a, b) => sessionTime(b.sessions[0]) - sessionTime(a.sessions[0]))
+-  }, [visibleMessagingSessions, messagingPlatformTotals, messagingTruncated, isPinnedSession, messagingProfile])
++  }, [visibleMessagingSessions, messagingPlatformTotals, messagingTruncated, messagingProfile])
+ 
+   // Recents and every messaging platform resolve owner groups the same way
+   // ([connectionId, profile]), so a platform's groups line up with recents.
+@@ -1596,7 +1528,7 @@ export function ChatSidebar({
+                       // resolved region has been observed to swallow clicks on the
+                       // top rows. Same carve-out as USER_BUBBLE_BASE_CLASS in
+                       // thread.tsx.
+-                      'flex h-7 w-full justify-start gap-2 rounded-md border border-transparent px-2 text-left text-[0.8125rem] font-medium text-(--ui-text-secondary) transition-colors duration-100 ease-out [-webkit-app-region:no-drag] hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none',
++                      'flex h-7 w-full justify-start gap-2 rounded-[10px] border border-transparent px-2 text-left text-[0.8125rem] font-normal text-(--ui-text-secondary) transition-colors duration-100 ease-out [-webkit-app-region:no-drag] hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none',
+                       active &&
+                         'border-(--ui-stroke-tertiary) bg-(--ui-control-active-background) text-foreground shadow-none hover:border-(--ui-stroke-tertiary)!',
+                       !isInteractive &&
+@@ -1754,34 +1686,6 @@ export function ChatSidebar({
+               />
+             )}
+ 
+-            {!trimmedQuery && (
+-              <SidebarSessionsSection
+-                activeSessionId={activeSidebarSessionId}
+-                // Inbox style rides whichever view is active — pinned rows
+-                // included, so one column never mixes card and inline
+-                // geometry at the section boundary.
+-                card={cardRows}
+-                contentClassName="flex flex-col gap-px rounded-lg pb-2 pt-1"
+-                dndSensors={dndSensors}
+-                emptyState={<SidebarPinnedEmptyState archived={showArchived} filtered={filtersNarrow} />}
+-                label={s.pinned}
+-                onArchiveSession={onArchiveSession}
+-                onBranchSession={onBranchSession}
+-                onDeleteSession={onDeleteSession}
+-                onReorderSessions={reorderPinned}
+-                onResumeSession={onResumeSession}
+-                onToggle={() => setSidebarPinsOpen(!pinsOpen)}
+-                onTogglePin={unpinSession}
+-                onToggleUnread={toggleUnread}
+-                open={pinsOpen}
+-                pinned
+-                rootClassName="shrink-0 p-0 pb-1"
+-                sessions={pinnedSessions}
+-                showProfileTags={showAllProfiles}
+-                sortable={pinnedSessions.length > 1}
+-              />
+-            )}
+-
+             {!trimmedQuery && inProject && projectLoadFailed && <SidebarLoadErrorState onRetry={retryProject} />}
+             {!trimmedQuery && (
+               <SidebarSessionsSection
+@@ -1818,9 +1722,7 @@ export function ChatSidebar({
+                         ? s.projectEmpty
+                         : filtersActive
+                           ? s.noFilterMatches
+-                          : pinnedSessions.length > 0
+-                            ? s.allPinned
+-                            : s.noSessions}
++                          : s.noSessions}
+                     </div>
+                   )
+                 }
+@@ -2056,11 +1958,17 @@ export function ChatSidebar({
+ 
+         {/* Off, the statusbar's profile dropdown (beside the gateway switcher)
+             takes over — the rail is a duplicate door for bot-only setups. */}
+-        {profileRailVisible && (
++        {profileRailVisible && !minimalBottomBar && (
+           <div className="shrink-0 px-0.5 pb-1 pt-0.5">
+             <ProfileRail />
+           </div>
+         )}
++
++        {/* Account door: pinned to the sidebar's bottom-left. It is chrome, so
++            it stays when the rest of the bottom rail is minimal. */}
++        <div className="mt-auto shrink-0 px-2 pb-1.5 pt-1">
++          <AccountMenu />
++        </div>
+       </SidebarContent>
+       <ProjectDialog />
+       {/* One mount for the whole app. The header of WorktreeDialog tells why. */}
+diff --git a/apps/desktop/src/app/chat/sidebar/session-actions-menu.test.tsx b/apps/desktop/src/app/chat/sidebar/session-actions-menu.test.tsx
+index 6d558e718f..18f72cf3ae 100644
+--- a/apps/desktop/src/app/chat/sidebar/session-actions-menu.test.tsx
++++ b/apps/desktop/src/app/chat/sidebar/session-actions-menu.test.tsx
+@@ -369,7 +369,7 @@ describe('SessionActionsMenu', () => {
+     await screen.findByRole('menu')
+     expect(screen.queryByRole('menuitem', { name: /rename/i })).toBeNull()
+     // The other identity verbs stay available — only Rename is gated.
+-    expect(screen.getByRole('menuitem', { name: /^pin$/i })).toBeTruthy()
++    expect(screen.getByRole('menuitem', { name: /archive/i })).toBeTruthy()
+ 
+     // No rename dialog is mounted anywhere (portals included): the verb is
+     // unreachable even programmatically, not just hidden from pointer users.
+diff --git a/apps/desktop/src/app/chat/sidebar/session-actions-menu.tsx b/apps/desktop/src/app/chat/sidebar/session-actions-menu.tsx
+index bdaf15a5ef..19096e290c 100644
+--- a/apps/desktop/src/app/chat/sidebar/session-actions-menu.tsx
++++ b/apps/desktop/src/app/chat/sidebar/session-actions-menu.tsx
+@@ -261,11 +261,9 @@ function MoveToProjectItems({ kit, sessionId, profile }: { kit: MenuKit; session
+ function useSessionActions({
+   sessionId,
+   title,
+-  pinned = false,
+   unread = false,
+   archived = false,
+   profile,
+-  onPin,
+   onToggleUnread,
+   onBranch,
+   onArchive,
+@@ -379,15 +377,6 @@ function useSessionActions({
+           })
+         ]
+       : []),
+-    spec({
+-      disabled: !onPin,
+-      icon: 'pin',
+-      label: pinned ? r.unpin : r.pin,
+-      onSelect: () => {
+-        triggerHaptic('selection')
+-        onPin?.()
+-      }
+-    }),
+     // One read-state item, driven by BOTH unread sources: the transient
+     // finished-unread dot (isUnread) and the backend watermark (unread).
+     // "Mark as read" clears whichever is lit; "Mark as unread" arms the
+diff --git a/apps/desktop/src/app/chat/sidebar/session-row.test.tsx b/apps/desktop/src/app/chat/sidebar/session-row.test.tsx
+index 82558e3e96..dc6b00cb7a 100644
+--- a/apps/desktop/src/app/chat/sidebar/session-row.test.tsx
++++ b/apps/desktop/src/app/chat/sidebar/session-row.test.tsx
+@@ -162,10 +162,11 @@ function makeSession(overrides: Partial<SessionInfo> & { title: string }): Sessi
+ 
+ const noop = vi.fn()
+ 
+-const renderRow = (session: SessionInfo, extra?: { card?: boolean }) =>
++const renderRow = (session: SessionInfo, extra?: { card?: boolean; nested?: boolean }) =>
+   render(
+     <SidebarSessionRow
+       card={extra?.card}
++      nested={extra?.nested}
+       isPinned={false}
+       isSelected={false}
+       onArchive={noop}
+@@ -181,26 +182,58 @@ const renderRow = (session: SessionInfo, extra?: { card?: boolean }) =>
+ // The row no longer takes its running state as a prop, so this drives the real
+ // store the way the app does. $workingSessionIds is the actual computed here
+ // (the mock above only overrides its siblings), which is what makes this cover
+-// the wiring rather than the predicate — the arc has gone missing before.
+-describe('SidebarSessionRow running arc', () => {
++// the wiring rather than the predicate.
++//
++// Busy used to be a travelling arc around the whole row. It is now the status
++// DOT that pulses (`.session-dot-pulse`): the row stays flat, and the motion is
++// the same primitive the pane tabs and the session switcher already render.
++describe('SidebarSessionRow busy indicator', () => {
+   afterEach(() => {
+     clearAllSessionStates()
+   })
+ 
+-  const arc = (container: HTMLElement) => container.querySelector('.arc-row')
++  const pulse = (container: HTMLElement) => container.querySelector('.session-dot-pulse')
+ 
+-  it('paints no arc for a settled session', () => {
++  it('leaves the dot still for a settled session', () => {
+     const { container } = renderRow(makeSession({ title: 'Settled' }))
+ 
+-    expect(arc(container)).toBeNull()
++    expect(pulse(container)).toBeNull()
++    expect(container.querySelector('.arc-row')).toBeNull()
+   })
+ 
+-  it('paints the arc while the session is running', () => {
++  it('pulses the dot while the session is running', () => {
+     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+ 
+     const { container } = renderRow(makeSession({ title: 'Running' }))
+ 
+-    expect(arc(container)).toBeTruthy()
++    expect(pulse(container)).toBeTruthy()
++    // The old ring is gone, not just hidden.
++    expect(container.querySelector('.arc-row')).toBeNull()
++  })
++})
++
++describe('SidebarSessionRow nested in the tree', () => {
++  afterEach(() => {
++    clearAllSessionStates()
++  })
++
++  const pulse = (container: HTMLElement) => container.querySelector('.session-dot-pulse')
++
++  // A nested row is name-only, so it used to render an empty lead — which meant
++  // a busy session in the project tree had NO indicator anywhere.
++  it('shows the pulsing dot while a nested session is running', () => {
++    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
++
++    const { container } = renderRow(makeSession({ title: 'Nested running' }), { nested: true })
++
++    expect(pulse(container)).toBeTruthy()
++  })
++
++  it('keeps a settled nested row name-only', () => {
++    const { container } = renderRow(makeSession({ title: 'Nested settled' }), { nested: true })
++
++    expect(pulse(container)).toBeNull()
++    expect(container.querySelector('[role="status"]')).toBeNull()
+   })
+ })
+ 
+diff --git a/apps/desktop/src/app/chat/sidebar/session-row.tsx b/apps/desktop/src/app/chat/sidebar/session-row.tsx
+index 9f24a5c7db..585737f54e 100644
+--- a/apps/desktop/src/app/chat/sidebar/session-row.tsx
++++ b/apps/desktop/src/app/chat/sidebar/session-row.tsx
+@@ -31,7 +31,7 @@ import { normalizeProfileKey } from '@/store/profile'
+ import { $projects } from '@/store/projects'
+ import { $pullRequestsByBranch, sessionPrKey } from '@/store/pull-requests'
+ import { sessionPinId } from '@/store/session'
+-import { $sessionDotStateById, hasLiveTurn, showsRunningArc } from '@/store/session-dot-state'
++import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
+ import { $sessionListDensity } from '@/store/session-list-density'
+ import { $openStoredSessionIds } from '@/store/session-states'
+ import { sessionCostUsd } from '@/store/sidebar-archive'
+@@ -83,6 +83,10 @@ interface SidebarSessionRowProps extends React.ComponentProps<'div'> {
+    *  model · size footer. The flat recents list opts in via the filter menu;
+    *  dense tree surfaces (projects, messaging, pins) keep the one-line row. */
+   card?: boolean
++  /** A row nested under its project header in the overview: name only, and no
++   *  leading dot — the title column lines up with the project label above it
++   *  instead of the project's folder glyph. */
++  nested?: boolean
+ }
+ 
+ const AGE_KEY = { day: 'ageDay', hour: 'ageHour', minute: 'ageMin' } as const
+@@ -142,6 +146,7 @@ function SidebarSessionRowImpl({
+   dragHandleProps,
+   showProfile = false,
+   card = false,
++  nested = false,
+   className,
+   style,
+   ref,
+@@ -213,9 +218,11 @@ function SidebarSessionRowImpl({
+     trailing.push({ key: 'pr', node: <PrTag pr={pr} /> })
+   }
+ 
+-  const showAge = pinnedAge || card
++  // A nested row is name-only: no figures, no age, whatever the Show menu says
++  // for the flat list — the project header above it already carries the lane.
++  const showAge = !nested && (pinnedAge || card)
+ 
+-  if (figures.length || showAge) {
++  if (!nested && (figures.length || showAge)) {
+     // The card's meta lines separate by spacing alone, so its header figures
+     // match (non-breaking pair — plain spaces collapse to one); the one-line
+     // row keeps the interpunct between joined figures.
+@@ -260,6 +267,12 @@ function SidebarSessionRowImpl({
+   // contradict each other. A selector, not a plain useStore: the map is rebuilt
+   // whenever any session's status changes, but a row only repaints on its own.
+   const dotState = useStoreSelector($sessionDotStateById, states => states[session.id] ?? 'idle')
++
++  // Something is happening right now. `unread` is deliberately out: a finished
++  // session keeps the tree name-only, only live ones earn a mark.
++  const activeStatus =
++    dotState === 'working' || dotState === 'stalled' || dotState === 'needs-input' || dotState === 'background'
++
+   const liveTurn = hasLiveTurn(dotState)
+ 
+   // Card header line: the workspace this belongs to — the project when it
+@@ -430,7 +443,6 @@ function SidebarSessionRowImpl({
+         style={style}
+         {...rest}
+       >
+-        {showsRunningArc(dotState) && <span aria-hidden="true" className="arc-border arc-row" />}
+         {/* #38072 finding 3: the row's body is a DIV, not a button — the
+             reorder grabber (dnd-kit role="button" + tabIndex, kept for
+             keyboard reorder, #83617) and the ⋯ trigger must be SIBLINGS of
+@@ -451,6 +463,10 @@ function SidebarSessionRowImpl({
+             // rule, a div doesn't.
+             'z-0 w-full cursor-pointer',
+             card && 'pr-0',
++            // Nested rows hang from the project LABEL, not its folder glyph:
++            // the label starts at the row inset, so drop the row's own padding
++            // and let the lead spacer line the title up underneath it.
++            nested && 'pl-0',
+             branchStem && 'pl-3.5',
+             // The card is a grid with ONE spacing knob: --card-gap. Every row
+             // gap is gap-y-(--card-gap); the title/preview group opts out
+@@ -497,7 +513,16 @@ function SidebarSessionRowImpl({
+           }}
+         >
+           {(() => {
+-            const leadNode = reorderable ? (
++            const leadNode = nested ? (
++              // A nested row is name-only at rest — but the lead box is still
++              // there (14px, same as every other row), so showing the status dot
++              // when the session is ACTIVE costs no alignment. Without this a
++              // nested row had no dot at all, and the busy pulse never appeared
++              // anywhere the tree renders sessions.
++              <SidebarRowLead className="overflow-hidden">
++                {activeStatus ? <SessionStatusDot session={session} storedSessionId={session.id} /> : null}
++              </SidebarRowLead>
++            ) : reorderable ? (
+               <SidebarRowGrab ariaLabel={handleLabel} dragging={dragging} dragHandleProps={dragHandleProps}>
+                 {lead ?? (
+                   <SessionStatusDot
+@@ -554,7 +579,7 @@ function SidebarSessionRowImpl({
+                     {/* Session-list density (#68119): comfortable adds one
+                         deterministic metadata line; detailed adds the initial
+                         request preview. Compact keeps today's one-line row. */}
+-                    {density !== 'compact' && details.metadata && (
++                    {!nested && density !== 'compact' && details.metadata && (
+                       <span
+                         className={cn(
+                           'mt-0.5 block truncate text-[0.625rem] text-(--ui-text-tertiary)',
+diff --git a/apps/desktop/src/app/chat/sidebar/sessions-section.tsx b/apps/desktop/src/app/chat/sidebar/sessions-section.tsx
+index 7ef18de6b4..b003a80bf3 100644
+--- a/apps/desktop/src/app/chat/sidebar/sessions-section.tsx
++++ b/apps/desktop/src/app/chat/sidebar/sessions-section.tsx
+@@ -75,7 +75,13 @@ function SidebarSectionHeader({
+   const labelBody = (
+     <>
+       {icon}
+-      <SidebarPanelLabel>{label}</SidebarPanelLabel>
++      <SidebarPanelLabel
++        className="text-[0.8125rem] font-normal tracking-normal"
++        dot={false}
++        uppercase={false}
++      >
++        {label}
++      </SidebarPanelLabel>
+       {meta && <SidebarSectionMeta>{meta}</SidebarSectionMeta>}
+     </>
+   )
+@@ -281,10 +287,12 @@ export function SidebarSessionsSection({
+   )
+ 
+   const renderRow = useCallback(
+-    (session: SessionInfo, draggable: boolean, branchStem?: string) => {
++    (session: SessionInfo, draggable: boolean, branchStem?: string, nested = false) => {
+       const rowProps = {
+         branchStem,
+-        card,
++        // A nested row is name-only: no card chrome, no metadata line, no dot.
++        card: nested ? false : card,
++        nested,
+         isPinned: pinned,
+         isSelected: session.id === activeSessionId,
+         onArchive: () => onArchiveSession(session.id),
+@@ -360,9 +368,9 @@ export function SidebarSessionsSection({
+ 
+   // A single flat/virtual/lane list row — either a divider or a session.
+   const renderListRow = useCallback(
+-    (row: SidebarListRow, draggable: boolean, action?: React.ReactNode) => {
++    (row: SidebarListRow, draggable: boolean, action?: React.ReactNode, nested = false) => {
+       if (row.kind === 'session') {
+-        return renderRow(row.entry.session, draggable, row.entry.branchStem)
++        return renderRow(row.entry.session, draggable, row.entry.branchStem, nested)
+       }
+ 
+       const label = 'label' in row ? row.label : sessionBucketLabel(row.bucket, dividerLabels)
+@@ -391,6 +399,15 @@ export function SidebarSessionsSection({
+     [renderRow]
+   )
+ 
++  // The projects overview stacks a project's chats directly under its label:
++  // name only, no leading dot, so the title column lines up with the project
++  // name rather than the folder glyph.
++  const renderNestedRows = useCallback(
++    (items: SessionInfo[]) =>
++      flattenSessionsWithBranches(items).map(({ session }) => renderRow(session, false, undefined, true)),
++    [renderRow]
++  )
++
+   // Limit complete groups, not sessions, so a burst and its branches stay
+   // together. Compute boundaries from the whole pool, just like Updated.
+   const renderPreviewRows = useCallback(
+@@ -404,7 +421,7 @@ export function SidebarSessionsSection({
+ 
+       const ordered = manualOrderIds?.length ? orderRowsWithinGroups(rows, manualOrderIds) : rows
+ 
+-      return hideCollapsedGroupRows(ordered, isListGroupOpen).map(row => renderListRow(row, false))
++      return hideCollapsedGroupRows(ordered, isListGroupOpen).map(row => renderListRow(row, false, undefined, true))
+     },
+     [isListGroupOpen, manualOrderIds, renderListRow, showAllSessions]
+   )
+@@ -418,7 +435,7 @@ export function SidebarSessionsSection({
+ 
+       const rows = grouping === 'date' ? groupEntriesByRecency(entries) : toSessionRows(entries)
+ 
+-      return hideCollapsedGroupRows(rows, isListGroupOpen).map(row => renderListRow(row, false))
++      return hideCollapsedGroupRows(rows, isListGroupOpen).map(row => renderListRow(row, false, undefined, true))
+     },
+     [grouping, isListGroupOpen, renderListRow]
+   )
+@@ -542,7 +559,7 @@ export function SidebarSessionsSection({
+         // preview rows instead of the live overlay.
+         previewSessions={projectOverviewPreviews?.[project.id]}
+         project={project}
+-        renderRows={showAllSessions ? items => renderPreviewRows(items, project.id) : renderRows}
++        renderRows={showAllSessions ? items => renderPreviewRows(items, project.id) : renderNestedRows}
+       />
+     )
+ 
+diff --git a/apps/desktop/src/assets/account/avatar.jpg b/apps/desktop/src/assets/account/avatar.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..3739d7cfc379fce7a39a5d919de64126507a5658
+GIT binary patch
+literal 8063
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/apps/desktop/src/plugins/hermes-bots/bot-row.tsx b/apps/desktop/src/plugins/hermes-bots/bot-row.tsx
+index c9110c749b..afb9b0c6fd 100644
+--- a/apps/desktop/src/plugins/hermes-bots/bot-row.tsx
++++ b/apps/desktop/src/plugins/hermes-bots/bot-row.tsx
+@@ -235,7 +235,7 @@ export function BotRow({ bot, onDelete, onEdit, onGroup, onNewSection, showHandl
+       aria-busy={isOpening || undefined}
+       aria-label={rowTooltip}
+       className={cn(
+-        'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-2 text-left transition-colors',
++        'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-[10px] px-2 py-2 text-left transition-colors',
+         'hover:bg-(--chrome-action-hover)',
+         isActive && 'bg-(--ui-row-active-background)',
+         // The row being dragged fades in place; the browser's drag image is
+@@ -540,7 +540,7 @@ export function GroupRow({ active, group, members, needsYou, onOpen, onDisband,
+     <RowButton
+       aria-label={`${group}, ${b.group.memberCount(members.length)}, ${availabilityLabel}`}
+       className={cn(
+-        'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-2 text-left transition-colors',
++        'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-[10px] px-2 py-2 text-left transition-colors',
+         'hover:bg-(--chrome-action-hover)',
+         active && 'bg-(--ui-row-active-background)',
+         dragging && 'opacity-40'
+diff --git a/apps/desktop/src/plugins/hermes-bots/plugin.tsx b/apps/desktop/src/plugins/hermes-bots/plugin.tsx
+index 017cdcd0de..2f80db3d80 100644
+--- a/apps/desktop/src/plugins/hermes-bots/plugin.tsx
++++ b/apps/desktop/src/plugins/hermes-bots/plugin.tsx
+@@ -475,6 +475,9 @@ export default {
+         width: '260px',
+         collapsible: true,
+         hideOnly: true,
++        // Paints the chat surface, so the zone's titlebar band and statusbar
++        // strip follow it instead of staying sidebar-grey.
++        surface: 'editor',
+         tabTitle: () => <LocalizedTabTitle select={t => t.common.bots} />,
+         tabTitleText: () => translateNow('common.bots'),
+         dock: {
+diff --git a/apps/desktop/src/store/minimal-chrome-prefs.ts b/apps/desktop/src/store/minimal-chrome-prefs.ts
+new file mode 100644
+index 0000000000..d5ed24c476
+--- /dev/null
++++ b/apps/desktop/src/store/minimal-chrome-prefs.ts
+@@ -0,0 +1,19 @@
++import { type Codec, persistentAtom } from '@/lib/persisted'
++
++const KEY = 'hermes.desktop.minimalBottomBar'
++
++/** Stored as the string 'true'; absent means off. */
++const codec: Codec<boolean> = {
++  decode: raw => raw === 'true',
++  encode: value => (value ? 'true' : null)
++}
++
++/**
++ * Whether everything below the session list is stripped back to the Command
++ * Center: the profile rail (chips + new/import/manage) goes away, and the
++ * statusbar keeps the ⌘ button alone.
++ *
++ * Off by default — the profile rail and the status chips are the established
++ * chrome. On, the sidebar bottom is one control.
++ */
++export const $minimalBottomBar = persistentAtom<boolean>(KEY, false, codec)
+diff --git a/apps/desktop/src/store/open-session-highlight.test.ts b/apps/desktop/src/store/open-session-highlight.test.ts
+new file mode 100644
+index 0000000000..fe850a9365
+--- /dev/null
++++ b/apps/desktop/src/store/open-session-highlight.test.ts
+@@ -0,0 +1,37 @@
++import { describe, expect, it, beforeEach } from 'vitest'
++
++import { $selectedStoredSessionId } from './session'
++import { $openStoredSessionIds, $parkedTileStoredIds, $sessionTiles } from './session-states'
++
++beforeEach(() => {
++  $selectedStoredSessionId.set(null)
++  $sessionTiles.set([])
++  $parkedTileStoredIds.set(new Set())
++})
++
++describe('$openStoredSessionIds', () => {
++  it('counts the selected session and every mounted tile', () => {
++    $selectedStoredSessionId.set('main')
++    $sessionTiles.set([{ storedSessionId: 'tile-a' }, { storedSessionId: 'tile-b' }])
++
++    expect([...$openStoredSessionIds.get()].sort()).toEqual(['main', 'tile-a', 'tile-b'])
++  })
++
++  // A parked tile is unmounted: nothing of it is on screen, so its sidebar row
++  // must not wear the "open elsewhere" band.
++  it('drops a parked tile from the highlight set', () => {
++    $selectedStoredSessionId.set('main')
++    $sessionTiles.set([{ storedSessionId: 'tile-a' }, { storedSessionId: 'parked' }])
++    $parkedTileStoredIds.set(new Set(['parked']))
++
++    expect([...$openStoredSessionIds.get()].sort()).toEqual(['main', 'tile-a'])
++  })
++
++  it('keeps the selected session highlighted even if a tile for it is parked', () => {
++    $selectedStoredSessionId.set('main')
++    $sessionTiles.set([{ storedSessionId: 'main' }])
++    $parkedTileStoredIds.set(new Set(['main']))
++
++    expect([...$openStoredSessionIds.get()]).toEqual(['main'])
++  })
++})
+diff --git a/apps/desktop/src/store/session-states.ts b/apps/desktop/src/store/session-states.ts
+index 7de73e070a..aa943cf7ba 100644
+--- a/apps/desktop/src/store/session-states.ts
++++ b/apps/desktop/src/store/session-states.ts
+@@ -2903,12 +2903,20 @@ export function reopenLastClosedTile(): void {
+ // ---------------------------------------------------------------------------
+ 
+ /** Every session currently OPEN as a surface: the primary's selection plus
+- *  every tile's stored id. The sidebar highlights all of them (the focused one
+- *  at full strength, the rest dimmed) so a multi-pane workspace shows which
+- *  chats are on screen, not just the one being typed into. */
++ *  every MOUNTED tile's stored id. The sidebar highlights all of them (the
++ *  focused one at full strength, the rest dimmed) so a multi-pane workspace
++ *  shows which chats are on screen, not just the one being typed into.
++ *
++ *  Parked tiles are excluded: they are still owned by a zone but unmounted, so
++ *  nothing of them is on screen. Leaving them in lit a row the user had closed
++ *  out of sight — a "selection" they never made. */
+ export const $openStoredSessionIds = computed(
+-  [$selectedStoredSessionId, $sessionTiles],
+-  (selected, tiles) => new Set([...(selected ? [selected] : []), ...tiles.map(t => t.storedSessionId)])
++  [$selectedStoredSessionId, $sessionTiles, $parkedTileStoredIds],
++  (selected, tiles, parked) =>
++    new Set([
++      ...(selected ? [selected] : []),
++      ...tiles.map(t => t.storedSessionId).filter(id => !parked.has(id))
++    ])
+ )
+ 
+ /** Live runtime id of the focused session (a tile's bound runtime, else the
+diff --git a/apps/desktop/src/store/single-activity.ts b/apps/desktop/src/store/single-activity.ts
+new file mode 100644
+index 0000000000..e5a42b4281
+--- /dev/null
++++ b/apps/desktop/src/store/single-activity.ts
+@@ -0,0 +1,24 @@
++import { type Codec, persistentAtom } from '@/lib/persisted'
++
++const SINGLE_ACTIVITY_STORAGE_KEY = 'hermes.desktop.singleActivity'
++
++/** Stored as the string 'true'; absent means off. */
++const codec: Codec<boolean> = {
++  decode: raw => raw === 'true',
++  encode: value => (value ? 'true' : null)
++}
++
++/**
++ * Whether a live turn narrates itself as ONE row that is replaced as the work
++ * moves on ("Thinking" → "Running npm run pack" → "Analyzing image") instead of
++ * stacking a row per thought and per tool run.
++ *
++ * Off by default: the stacked feed is the established transcript. On, the whole
++ * activity stays one line for the length of the turn; the stack is still one
++ * disclosure away, and a settled turn folds to "Worked for …" either way.
++ */
++export const $singleActivity = persistentAtom<boolean>(SINGLE_ACTIVITY_STORAGE_KEY, false, codec)
++
++export function setSingleActivity(value: boolean) {
++  $singleActivity.set(value)
++}
+diff --git a/apps/desktop/src/store/status-stack-prefs.ts b/apps/desktop/src/store/status-stack-prefs.ts
+new file mode 100644
+index 0000000000..69199c6e10
+--- /dev/null
++++ b/apps/desktop/src/store/status-stack-prefs.ts
+@@ -0,0 +1,21 @@
++import { type Codec, persistentAtom } from '@/lib/persisted'
++
++const KEY = 'hermes.desktop.statusStack.attentionOnly'
++
++/** Stored as the string 'true'; absent means off. */
++const codec: Codec<boolean> = {
++  decode: raw => raw === 'true',
++  encode: value => (value ? 'true' : null)
++}
++
++/**
++ * Whether the composer status card shows ONLY what needs the user — queued
++ * turns, background processes, goals/heartbeats, account notices — and drops
++ * the live work rows (subagents, todos, preview artifacts) that narrate a turn
++ * in progress and then vanish.
++ *
++ * Off by default: the full stack is the established composer chrome. On, a
++ * turn's transient activity never pushes a card above the input; the transcript
++ * already narrates it.
++ */
++export const $statusStackAttentionOnly = persistentAtom<boolean>(KEY, false, codec)

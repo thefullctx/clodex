@@ -1,0 +1,823 @@
+diff --git a/apps/desktop/src/app/chat/composer/status-stack/index.tsx b/apps/desktop/src/app/chat/composer/status-stack/index.tsx
+index 754b1c9ec5..608fb459c7 100644
+--- a/apps/desktop/src/app/chat/composer/status-stack/index.tsx
++++ b/apps/desktop/src/app/chat/composer/status-stack/index.tsx
+@@ -36,6 +36,7 @@ import { $interfaceMode, shownInMode, type Tiered } from '@/store/interface-mode
+ import { $previewStatusBySession, dismissPreviewArtifact } from '@/store/preview-status'
+ import { $sessionControlBySession, refreshSessionControl } from '@/store/session-control'
+ import { $sharedMetricsConsent, sharedMetricsOfferPending } from '@/store/shared-metrics'
++import { $statusStackAttentionOnly } from '@/store/status-stack-prefs'
+ import { $threadScrolledUpBySession } from '@/store/thread-scroll'
+ import { $retainedTodosBySession } from '@/store/todos'
+ import { openSessionInNewWindow } from '@/store/windows'
+@@ -149,6 +150,11 @@ export function ComposerStatusStack({ onSubmit, queue, sessionId }: ComposerStat
+   const sharedMetricsOffer = ownsFreeTierNotice && !freeTierNotice && sharedMetricsOfferPending(sharedMetricsConsent)
+ 
+   const isStructuredSupported = controlEntry?.capability === 'supported'
++  // Attention-only: drop the rows that narrate a turn in progress (subagents,
++  // todos, preview artifacts) and keep what needs the user — queued turns,
++  // background processes, goals, notices. The transcript already narrates the
++  // turn; a second card above the input is noise.
++  const attentionOnly = useStore($statusStackAttentionOnly)
+ 
+   // Every group, before the shelf decides what to SHOW: whether a dev server is
+   // running is a fact about the session (it keeps its localhost preview chip
+@@ -158,8 +164,15 @@ export function ComposerStatusStack({ onSubmit, queue, sessionId }: ComposerStat
+   const hasRunningBackground = allGroups.some(g => g.type === 'background' && g.items.some(i => i.state === 'running'))
+ 
+   const groups = useMemo(
+-    () => allGroups.filter(group => shown(GROUP_TIER[group.type]) && (group.type !== 'goal' || !isStructuredSupported)),
+-    [allGroups, isStructuredSupported, shown]
++    () =>
++      allGroups.filter(group => {
++        if (attentionOnly) {
++          return group.type === 'background'
++        }
++
++        return shown(GROUP_TIER[group.type]) && (group.type !== 'goal' || !isStructuredSupported)
++      }),
++    [allGroups, attentionOnly, isStructuredSupported, shown]
+   )
+ 
+   // Seed from the registry on session open; event-driven refreshes (terminal /
+@@ -310,7 +323,7 @@ export function ComposerStatusStack({ onSubmit, queue, sessionId }: ComposerStat
+ 
+   // A settled snapshot is reviewable but never re-enters the live progress
+   // feed. Only show this disclosure once the live Todo section has retired.
+-  if (!busy && retainedTodos.length > 0 && !groups.some(group => group.type === 'todo')) {
++  if (!attentionOnly && !busy && retainedTodos.length > 0 && !groups.some(group => group.type === 'todo')) {
+     const done = retainedTodos.filter(todo => todo.status === 'completed').length
+     sections.push({
+       key: 'retained-todo',
+@@ -345,7 +358,7 @@ export function ComposerStatusStack({ onSubmit, queue, sessionId }: ComposerStat
+ 
+   // Artifact links stay visible at the bottom, nearest the composer, even when
+   // the queue or background group expands.
+-  if (previewRows.length > 0) {
++  if (!attentionOnly && previewRows.length > 0) {
+     sections.push({ key: 'preview', node: <div className="status-artifacts">{previewRows}</div> })
+   }
+ 
+diff --git a/apps/desktop/src/components/assistant-ui/thread/assistant-message.tsx b/apps/desktop/src/components/assistant-ui/thread/assistant-message.tsx
+index a46dbc0ed9..7baa3261fb 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/assistant-message.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/assistant-message.tsx
+@@ -37,6 +37,7 @@ import { ResponseMessageIds } from '@/components/assistant-ui/thread/response-gr
+ import { ResponseLoadingIndicator, TurnActivityIndicator } from '@/components/assistant-ui/thread/status'
+ import { threadMessageIndex } from '@/components/assistant-ui/thread/thread-message-index'
+ import { MessageTimelineTimestamp } from '@/components/assistant-ui/thread/timeline-timestamp'
++import { TurnActivityScope } from '@/components/assistant-ui/thread/turn-collapse'
+ import { useMessageReactions, useTapbackDoubleClick } from '@/components/assistant-ui/thread/use-message-reactions'
+ import { AGENT_MESSAGE_RE } from '@/components/assistant-ui/thread/user-message'
+ import { isApprovalActivity, isCurrentTurnMessage } from '@/components/assistant-ui/tool/approval-activity'
+@@ -93,6 +94,7 @@ import { sessionApprovalRequest } from '@/store/prompts'
+ import { requestSendDiagnostics } from '@/store/send-diagnostics'
+ import { $connection, $currentModel, setModelPickerOpen } from '@/store/session'
+ import { sessionTileDelegate } from '@/store/session-states'
++import { $singleActivity } from '@/store/single-activity'
+ import { notifyThreadEditOpen } from '@/store/thread-scroll'
+ import { $voicePlayback } from '@/store/voice-playback'
+ 
+@@ -325,7 +327,7 @@ const AssistantMessageBody: FC<AssistantMessageProps & { collapsedNotice?: null
+             data-slot="aui_assistant-message-content"
+           >
+             {/* Todos render in the composer status stack now, not inline. */}
+-            {MESSAGE_PARTS}
++            <TurnActivityScope durationS={turnDurationS}>{MESSAGE_PARTS}</TurnActivityScope>
+             <StoppedNotice />
+             <AssistantStatusSlot />
+             <AssistantPreviewEmbeds />
+@@ -409,6 +411,10 @@ const StoppedNotice: FC = () => {
+  * itself a leaf and this stays off the message root either way.
+  */
+ const AssistantStatusSlot: FC = () => {
++  // One activity line already narrates the turn (TurnActivityScope); the tail
++  // status row would be a second, blue-tinted "working" box underneath it.
++  const singleActivity = useStore($singleActivity)
++
+   // ONE subscription, not one per input. Each useAuiState is a separate store
+   // subscription with its own equality check and its own chance to schedule a
+   // render, and these inputs always move together on a status flip — so
+@@ -431,7 +437,7 @@ const AssistantStatusSlot: FC = () => {
+     return s.message.content.every(part => part.type === 'reasoning') ? 'thinking' : 'activity'
+   })
+ 
+-  if (slot === 'none') {
++  if (singleActivity || slot === 'none') {
+     return null
+   }
+ 
+@@ -1482,7 +1488,11 @@ const AssistantActionBar: FC<MessageActionProps & { durationS?: number }> = ({
+           clicking it reopens the picker to switch or retract. Outside
+           ActionBarPrimitive.Root so a landed reaction doesn't ride the bar's
+           hover opacity. */}
+-      {(reactionsEnabled || shownReactions.length > 0) && (
++      {/* No empty-slot reaction affordance: a ☺ that materialised whenever the
++          pointer crossed a message read as clutter under the turn. Landed
++          reactions still render (and stay clickable); reacting itself stays on
++          the hidden gestures — double-click tapback, right-click on the bubble. */}
++      {shownReactions.length > 0 && (
+         <ReactionPicker
+           onOpenChange={setPickerOpen}
+           onSelect={pickEmoji}
+diff --git a/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx b/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
+index 4d56c0e9f7..69abe041d3 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
+@@ -20,6 +20,7 @@ import { setThemeCall } from '@/components/assistant-ui/theme-picker/args'
+ import { ThemeTool } from '@/components/assistant-ui/theme-picker/theme-tool'
+ import { AgentDeliveryNotice, deliveryTargetFromCommand } from '@/components/assistant-ui/thread/agent-delivery'
+ import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-timestamp'
++import { useTurnActivityHidden } from '@/components/assistant-ui/thread/turn-collapse'
+ import { DelegateTool } from '@/components/assistant-ui/tool/delegate'
+ import { ToolFallback, ToolGroupSlot } from '@/components/assistant-ui/tool/fallback'
+ import { parseMaybeObject, toolCallFailed } from '@/components/assistant-ui/tool/fallback-model'
+@@ -376,6 +377,7 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
+   endIndex,
+   startIndex
+ }) => {
++  const turnActivityHidden = useTurnActivityHidden()
+   const showReasoning = useStore($showReasoning)
+   const messageId = useAuiState(s => s.message.id)
+   const messageRunning = useAuiState(s => s.message.status?.type === 'running')
+@@ -417,7 +419,7 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
+     }, undefined)
+   )
+ 
+-  if (!hasContent || !showReasoning) {
++  if (!hasContent || !showReasoning || turnActivityHidden) {
+     return null
+   }
+ 
+@@ -442,6 +444,7 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
+ // useMessagePartText — the reasoning-only smoothing wrapper (removed) stalled
+ // the char-reveal at empty, blanking the widget.
+ const ReasoningTextPart: ReasoningMessagePartComponent = () => {
++  const turnActivityHidden = useTurnActivityHidden()
+   const { status, text } = useMessagePartReasoning()
+   const messageRunning = useAuiState(s => s.message.status?.type === 'running')
+ 
+@@ -451,7 +454,7 @@ const ReasoningTextPart: ReasoningMessagePartComponent = () => {
+   const showReasoning = useStore($showReasoning)
+   const textDirection = useForcedTextDirection()
+ 
+-  if (!showReasoning) {
++  if (!showReasoning || turnActivityHidden) {
+     return null
+   }
+ 
+@@ -474,6 +477,10 @@ const ReasoningTextPart: ReasoningMessagePartComponent = () => {
+ // re-render on every streaming delta. Memo invalidation alone doesn't
+ // remount, but combined with the previous ToolFallback group-swap it was a
+ // big chunk of the per-delta work.
++// The fold gate for a settled turn lives on the run itself (ToolRun), not here:
++// a group can also hold kept rows — failures, approvals — that must stay on
++// screen even when the turn is folded.
++
+ export const MESSAGE_PARTS_COMPONENTS = {
+   Reasoning: ReasoningTextPart,
+   ReasoningGroup: ReasoningAccordionGroup,
+diff --git a/apps/desktop/src/components/assistant-ui/thread/reaction-picker-focus-follow.test.tsx b/apps/desktop/src/components/assistant-ui/thread/reaction-picker-focus-follow.test.tsx
+index dc3f1c804c..e2c2451e21 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/reaction-picker-focus-follow.test.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/reaction-picker-focus-follow.test.tsx
+@@ -1,5 +1,5 @@
+ import { AssistantRuntimeProvider, type ThreadMessage, useExternalStoreRuntime } from '@assistant-ui/react'
+-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
++import { cleanup, render, screen } from '@testing-library/react'
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+ 
+ import { registerFloatingComposer } from '@/app/chat/composer/floating-target'
+@@ -46,20 +46,18 @@ afterEach(() => {
+   $reactionsEnabled.set(false)
+ })
+ 
+-describe('assistant reaction picker', () => {
+-  it('stays open while the pointer moves over the message toward it', async () => {
++describe('assistant reaction slot', () => {
++  // The empty slot used to render a ☺ the moment the pointer crossed a message.
++  // That read as clutter under the turn, so the affordance is gone: nothing is
++  // drawn until a reaction actually lands. Reacting stays on the hidden
++  // gestures (double-click tapback; right-click on a sent bubble).
++  it('renders no reaction affordance while the message has none', async () => {
+     render(<Harness />)
+ 
+     const message = (await screen.findByText('done')).closest<HTMLElement>('[data-slot="aui_assistant-message-root"]')
+-    const trigger = message?.querySelector<HTMLButtonElement>('[data-slot="aui_msg-reactions"]')
+ 
+-    expect(trigger).toBeTruthy()
+-    fireEvent.click(trigger!)
+-    expect(await screen.findByRole('button', { name: '👍' })).toBeTruthy()
+-
+-    fireEvent.pointerMove(message!, { buttons: 0, clientX: 40, clientY: 40 })
+-
+-    expect(screen.queryByRole('button', { name: '👍' })).not.toBeNull()
+-    expect(trigger?.getAttribute('data-state')).toBe('open')
++    expect(message).toBeTruthy()
++    expect(message?.querySelector('[data-slot="aui_msg-reactions"]')).toBeNull()
++    expect(screen.queryByRole('button', { name: '👍' })).toBeNull()
+   })
+ })
+diff --git a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts
+new file mode 100644
+index 0000000000..fa05ac5e77
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts
+@@ -0,0 +1,47 @@
++import { describe, expect, it } from 'vitest'
++
++import { liveActivityLabel } from './turn-collapse'
++
++const COPY = { thinking: 'Thinking', thought: 'Thought' }
++
++const reasoning = (status: 'complete' | 'running' = 'running') => ({ status: { type: status }, type: 'reasoning' })
++const text = () => ({ type: 'text' })
++const tool = (toolName: string, args: Record<string, unknown> = {}, settled = false) => ({
++  args,
++  completedAt: settled ? 1 : undefined,
++  result: settled ? { ok: true } : undefined,
++  toolName,
++  type: 'tool-call'
++})
++
++describe('liveActivityLabel', () => {
++  it('narrates a pending call in the present tense, naming it', () => {
++    expect(liveActivityLabel([tool('terminal', { command: 'npm run pack' })], COPY)).toBe('Running npm run pack')
++    expect(liveActivityLabel([tool('vision_analyze', { image_url: 'x.png' })], COPY)).toBe('Analyzing 1 image')
++  })
++
++  it('counts a settled run instead of naming it', () => {
++    expect(
++      liveActivityLabel([tool('terminal', { command: 'ls' }, true), tool('terminal', { command: 'pwd' }, true)], COPY)
++    ).toBe('Ran 2 commands')
++  })
++
++  it('shows only the trailing run — earlier steps are history', () => {
++    expect(
++      liveActivityLabel(
++        [tool('terminal', { command: 'ls' }, true), text(), tool('terminal', { command: 'npm test' })],
++        COPY
++      )
++    ).toBe('Running npm test')
++  })
++
++  it('narrates reasoning while it runs and settles to "Thought"', () => {
++    expect(liveActivityLabel([reasoning('running')], COPY)).toBe('Thinking')
++    expect(liveActivityLabel([reasoning('complete')], COPY)).toBe('Thought')
++  })
++
++  it('says nothing while the tail is prose', () => {
++    expect(liveActivityLabel([reasoning('complete'), text()], COPY)).toBe('')
++    expect(liveActivityLabel([], COPY)).toBe('')
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx
+new file mode 100644
+index 0000000000..8e290b3c63
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx
+@@ -0,0 +1,137 @@
++import { useAuiState } from '@assistant-ui/react'
++import { useStore } from '@nanostores/react'
++import { createContext, type ReactNode, useContext, useRef } from 'react'
++
++import { formatDurationSeconds } from '@/components/assistant-ui/tool/fallback-model/format'
++import { summarizeToolRun, toolActivityTarget, toolPresentVerb, type ToolCallLike } from '@/components/assistant-ui/tool/run-summary'
++import { SCAFFOLD_GLYPH_CLASS, SCAFFOLD_LABEL_CLASS, ScaffoldRow } from '@/components/chat/scaffold-row'
++import { ToolIcon } from '@/components/ui/tool-icon'
++import { useI18n } from '@/i18n'
++import { cn } from '@/lib/utils'
++import { $singleActivity } from '@/store/single-activity'
++import { $toolDisclosureOpen, setToolDisclosureOpen } from '@/store/tool-view'
++
++/**
++ * True while a turn's scaffolding is folded into its single row. The tool and
++ * reasoning renderers return null instead of drawing rows; text parts never
++ * consult it, so the reply itself can never be folded away.
++ */
++export const TurnActivityHiddenContext = createContext(false)
++
++export const useTurnActivityHidden = (): boolean => useContext(TurnActivityHiddenContext)
++
++interface LivePart {
++  completedAt?: number
++  result?: unknown
++  status?: { type?: string }
++  type: string
++}
++
++/**
++ * The one line a live turn shows: what is happening right now.
++ *
++ * The trailing run of tool calls names itself in the present tense while a call
++ * is in flight ("Running npm run pack") and in the past once it settles ("Ran 3
++ * commands"); a reasoning block narrates as "Thinking" until it seals, then
++ * "Thought". Returns '' when the tail is prose — the turn is writing, and there
++ * is nothing to narrate.
++ */
++export function liveActivityLabel(
++  parts: readonly LivePart[],
++  copy: { thinking: string; thought: string }
++): string {
++  let index = parts.length - 1
++  const run: ToolCallLike[] = []
++
++  while (index >= 0 && parts[index]?.type === 'tool-call') {
++    run.unshift(parts[index] as unknown as ToolCallLike)
++    index -= 1
++  }
++
++  if (run.length) {
++    // A single call in flight names what it is doing ("Running npm run pack");
++    // a settled step counts instead ("Ran 3 commands"), which is the reading
++    // that stays useful once the detail is history.
++    if (run.length === 1 && run[0].result === undefined && run[0].completedAt === undefined) {
++      const target = toolActivityTarget(run[0])
++
++      if (target) {
++        return `${toolPresentVerb(run[0].toolName)} ${target}`
++      }
++    }
++
++    return summarizeToolRun(
++      run,
++      run.some(tool => tool.result === undefined && tool.completedAt === undefined)
++    )
++  }
++
++  const last = parts[index]
++
++  if (last?.type === 'reasoning') {
++    return last.status?.type === 'complete' ? copy.thought : copy.thinking
++  }
++
++  return ''
++}
++
++/**
++ * A turn's whole activity as one row, plus the fold that keeps it that way.
++ *
++ * Live, the row narrates the current step and is replaced as the turn moves on;
++ * settled, it becomes "Worked for 2m 14s". Either way it is a disclosure:
++ * opening it restores every thought and tool run in place, interleaved with the
++ * prose. Text is never folded — the answer is always on screen.
++ *
++ * Subscriptions live here, not at the message root: a status flip re-renders
++ * this scope (whose child element identity is stable) and never the transcript
++ * row around it (status-invalidation-scope.test.tsx).
++ */
++export function TurnActivityScope({ children, durationS }: { children: ReactNode; durationS?: number }) {
++  const { t } = useI18n()
++  const messageId = useAuiState(s => s.message.id)
++  const running = useAuiState(s => s.message.status?.type === 'running')
++  const label = useAuiState(s => liveActivityLabel(s.message.parts, t.assistant.thread))
++  const hasActivity = useAuiState(s =>
++    s.message.parts.some(part => part.type === 'tool-call' || part.type === 'reasoning')
++  )
++
++  const disclosureId = `turn:${messageId}`
++  const open = useStore($toolDisclosureOpen(disclosureId))
++  const singleActivityLine = useStore($singleActivity)
++
++  // While the model writes prose the tail is text, so the live label goes empty
++  // for a moment. Remember the last real step instead of flashing back to the
++  // whole stack (or a "Thinking" that is no longer true).
++  const lastLabel = useRef('')
++
++  if (running && label) {
++    lastLabel.current = label
++  }
++
++  const showRow = hasActivity && (running ? singleActivityLine : durationS !== undefined)
++  const fold = showRow && !open
++  const copy = running
++    ? label || lastLabel.current || t.assistant.thread.thinking
++    : durationS !== undefined
++      ? t.assistant.thread.workedFor(formatDurationSeconds(durationS))
++      : ''
++
++  return (
++    <>
++      {showRow && (
++        <div data-conversation-scaffold="" data-slot="turn-activity-row">
++          <ScaffoldRow onToggle={() => setToolDisclosureOpen(disclosureId, !open)} open={Boolean(open)}>
++            <span className={SCAFFOLD_GLYPH_CLASS}>
++              <ToolIcon className="text-(--ui-text-tertiary)" name="watch" size="0.8125rem" />
++            </span>
++            <span className={cn(SCAFFOLD_LABEL_CLASS, 'truncate')}>
++              {running ? <span className="shimmer">{copy}</span> : copy}
++            </span>
++          </ScaffoldRow>
++        </div>
++      )}
++      <TurnActivityHiddenContext.Provider value={fold}>{children}</TurnActivityHiddenContext.Provider>
++    </>
++  )
++}
+diff --git a/apps/desktop/src/components/assistant-ui/thread/user-message.tsx b/apps/desktop/src/components/assistant-ui/thread/user-message.tsx
+index 212dc273dd..9f69d8606c 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/user-message.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/user-message.tsx
+@@ -77,7 +77,7 @@ export function StickyHumanMessageContainer({
+ // so without the carve-out, clicking a stuck bubble drags the window instead of
+ // opening the edit composer.
+ export const USER_BUBBLE_BASE_CLASS =
+-  'composer-human-message standalone-glass relative flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-y-auto rounded-xl border bg-(--dt-user-bubble) px-3 py-2 text-left [-webkit-app-region:no-drag]'
++  'composer-human-message standalone-glass relative flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-y-auto rounded-[10px] border bg-(--dt-user-bubble) px-3 py-2 text-left [-webkit-app-region:no-drag]'
+ 
+ export const USER_ACTION_ICON_BUTTON_CLASS =
+   'grid place-items-center rounded-md bg-transparent text-(--ui-text-secondary) transition-colors hover:bg-(--ui-control-active-background) hover:text-foreground disabled:cursor-default disabled:text-(--ui-text-quaternary) disabled:opacity-70'
+diff --git a/apps/desktop/src/components/assistant-ui/tool/fallback.tsx b/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+index e3a7584d17..0f84056ab5 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
++++ b/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+@@ -22,6 +22,7 @@ import { AnsiText } from '@/components/assistant-ui/ansi-text'
+ import { MarkdownImage } from '@/components/assistant-ui/markdown-text'
+ import { SET_THEME_TOOL, setThemeCall } from '@/components/assistant-ui/theme-picker/args'
+ import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-timestamp'
++import { useTurnActivityHidden } from '@/components/assistant-ui/thread/turn-collapse'
+ import { useElapsedSeconds } from '@/components/chat/activity-timer'
+ import { ActivityTimerText } from '@/components/chat/activity-timer-text'
+ import { CompactMarkdown } from '@/components/chat/compact-markdown'
+@@ -76,12 +77,13 @@ import {
+   type SearchResultRow,
+   selectMessageRunning,
+   toolCopyPayload,
++  toolCallFailed,
+   toolEntryDisclosureId,
+   type ToolPart,
+   type ToolStatus,
+   type ToolTitleAction
+ } from './fallback-model'
+-import { isToolCallPart, summarizeToolRun } from './run-summary'
++import { isToolCallPart, runHasCommand, summarizeToolRun } from './run-summary'
+ import { ToolRunTicker } from './run-ticker'
+ 
+ // `true` when a ToolEntry is rendered inside an embedding wrapper that owns
+@@ -877,6 +879,7 @@ export function splitRunItems(toolNames: readonly string[]): RunItem[] {
+ // ticker by default; its toggle can reveal the activity before it settles.
+ function ToolRunHeader({
+   completedAt,
++  hasCommand,
+   live,
+   onToggle,
+   open,
+@@ -884,6 +887,7 @@ function ToolRunHeader({
+   summary
+ }: {
+   completedAt?: number
++  hasCommand: boolean
+   live: boolean
+   onToggle?: () => void
+   open: boolean
+@@ -897,6 +901,13 @@ function ToolRunHeader({
+         open={open}
+         trailing={<TimelineTimestamp completedAt={completedAt} timestamp={startedAt} />}
+       >
++        {hasCommand && (
++          /* Same fixed glyph cell every scaffold line uses, so the labels keep
++             one left edge whether the row leads with a tool icon or a dot. */
++          <span className={TOOL_HEADER_GLYPH_WRAP_CLASS} data-tool-run-icon="">
++            <ToolIcon className="text-(--ui-text-tertiary)" name="terminal" size="0.8125rem" />
++          </span>
++        )}
+         <FadeText className={cn(SCAFFOLD_LABEL_CLASS, 'truncate')}>
+           {live ? <span className="shimmer">{summary}</span> : summary}
+         </FadeText>
+@@ -911,6 +922,10 @@ interface ToolRunState {
+   count: number
+   /** Disclosure id of each row in the run, so the run can tell when one is open. */
+   entryIds: readonly string[]
++  /** The run holds at least one shell command — the header wears the terminal glyph. */
++  hasCommand: boolean
++  /** A failed call in the run keeps it on screen even inside a folded turn. */
++  hasFailure: boolean
+   key: string
+   live: boolean
+   startedAt?: number
+@@ -980,6 +995,8 @@ function useToolRun(startIndex: number, endIndex: number): ToolRunState {
+           count: tools.length,
+           approvalActivity: tools.length > 0 && tools.every(isApprovalActivity),
+           entryIds: tools.map(tool => toolEntryDisclosureId(state.message.id, tool)),
++          hasCommand: runHasCommand(tools),
++          hasFailure: tools.some(toolCallFailed),
+           key: `${state.message.id}:${tools[0]?.toolCallId ?? ''}`,
+           live,
+           startedAt: timelineTools.reduce<number | undefined>(
+@@ -1021,10 +1038,8 @@ const ToolRun: FC<PropsWithChildren<{ endIndex: number; startIndex: number }>> =
+ }) => {
+   const messageRunning = useAuiState(selectMessageRunning)
+ 
+-  const { completedAt, count, entryIds, key, live, startedAt, summary, approvalActivity } = useToolRun(
+-    startIndex,
+-    endIndex
+-  )
++  const { completedAt, count, entryIds, hasCommand, hasFailure, key, live, startedAt, summary, approvalActivity } =
++    useToolRun(startIndex, endIndex)
+ 
+   const sessionId = useStore(useSessionView().$runtimeId)
+   const approval = useStore(useMemo(() => sessionApprovalRequest(sessionId), [sessionId]))
+@@ -1037,6 +1052,14 @@ const ToolRun: FC<PropsWithChildren<{ endIndex: number; startIndex: number }>> =
+   const expanded = count < 2 || (persistedOpen ?? rowOpen)
+   const collapsed = representedByApproval && !rowOpen && !persistedOpen
+   const reduced = useReducedMotion()
++  const turnActivityHidden = useTurnActivityHidden()
++
++  // A folded turn hides its scaffolding; a failure is not scaffolding, so the
++  // run that carries one stays on screen — same rule the feed uses when the
++  // activity display is off.
++  if (turnActivityHidden && !hasFailure) {
++    return null
++  }
+ 
+   // The original runtime stays mounted while its summary owns the activity.
+   // Reveal its footprint gradually when the last approval clears, instead of
+@@ -1057,6 +1080,7 @@ const ToolRun: FC<PropsWithChildren<{ endIndex: number; startIndex: number }>> =
+         {count > 1 && !representedByApproval && (
+           <ToolRunHeader
+             completedAt={completedAt}
++            hasCommand={hasCommand}
+             live={live}
+             onToggle={() => setToolDisclosureOpen(disclosureId, !expanded)}
+             open={expanded}
+@@ -1112,6 +1136,17 @@ export const ToolGroupSlot: FC<PropsWithChildren<{ endIndex: number; startIndex:
+   const items = useMemo(() => splitRunItems(toolNameKey.split('\u0000')), [toolNameKey])
+   const rows = Children.toArray(children)
+ 
++  // A folded turn drops this whole group — including the cards (diffs, plans,
++  // artifacts) that normally stay in place. What it must never drop is a
++  // failure or an approval: those are the rows the user has to act on, so a
++  // group carrying one renders in full and the fold leaves it alone.
++  const turnActivityHidden = useTurnActivityHidden()
++  const hasKeptRow = useAuiState(state =>
++    state.message.parts
++      .slice(Math.max(0, startIndex), endIndex + 1)
++      .some(part => part.type === 'tool-call' && (isApprovalActivity(part) || toolCallFailed(part)))
++  )
++
+   // The run scaffold ("Explored N files") is part of the tool feed and follows
+   // display.tool_progress. Children still mount so clarify, diffs, and failed
+   // calls can render on their own.
+@@ -1119,6 +1154,10 @@ export const ToolGroupSlot: FC<PropsWithChildren<{ endIndex: number; startIndex:
+     return children
+   }
+ 
++  if (turnActivityHidden && !hasKeptRow) {
++    return null
++  }
++
+   return (
+     <ToolEmbedContext.Provider value={false}>
+       {items.map(item =>
+@@ -1169,5 +1208,14 @@ export const ToolFallback = ({
+     type: 'tool-call'
+   }
+ 
++  // Card rows (diffs, plans, artifacts) render as their own tool block, outside
++  // any run — the fold has to reach them here. Failures and approvals are the
++  // rows the user acts on, so they survive a folded turn.
++  const turnActivityHidden = useTurnActivityHidden()
++
++  if (turnActivityHidden && !isApprovalActivity(part) && !toolCallFailed(part)) {
++    return null
++  }
++
+   return <ToolEntry part={part} />
+ }
+diff --git a/apps/desktop/src/components/assistant-ui/tool/run-summary.test.ts b/apps/desktop/src/components/assistant-ui/tool/run-summary.test.ts
+index e3b27774df..9c17853a95 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/run-summary.test.ts
++++ b/apps/desktop/src/components/assistant-ui/tool/run-summary.test.ts
+@@ -47,8 +47,9 @@ describe('summarizeToolRun', () => {
+     )
+   })
+ 
+-  it('names the command that is still running', () => {
+-    expect(running([tool('terminal', { command: 'npm run typecheck' })])).toMatch(/^Running /)
++  it('counts commands while they run too — the ticker names the live one', () => {
++    expect(running([tool('terminal', { command: 'npm run typecheck' })])).toBe('Running 1 command')
++    expect(running([ran('x'), tool('terminal', { command: 'npm test' })])).toBe('Running 2 commands')
+   })
+ 
+   // Sequential calls leave a gap where the run is still going but nothing is
+diff --git a/apps/desktop/src/components/assistant-ui/tool/run-summary.ts b/apps/desktop/src/components/assistant-ui/tool/run-summary.ts
+index 81e7f21423..0fb7418952 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/run-summary.ts
++++ b/apps/desktop/src/components/assistant-ui/tool/run-summary.ts
+@@ -151,6 +151,11 @@ function toolTarget(tool: ToolCallLike): string {
+   return path ? fileEditBasename(path) : firstStringField(args, ['query', 'url'])
+ }
+ 
++/** Public read of the same target, for the live single-activity line. */
++export function toolActivityTarget(tool: ToolCallLike): string {
++  return toolTarget(tool)
++}
++
+ /**
+  * One clause per category. A category holding a single thing says what it was
+  * ("Edited wiring.tsx"); anything else counts ("explored 3 files"). A settled
+@@ -163,13 +168,22 @@ function clause(category: RunCategory, tools: ToolCallLike[], live: boolean): st
+   const count = tools.reduce((sum, tool) => sum + unitCount(tool), 0)
+   const target = count === 1 && category !== 'interact' ? toolTarget(tools[0]) : ''
+ 
+-  if (target && (live || category !== 'run')) {
++  // A command run reads as a count in both tenses. While it is live the ticker
++  // shows the command line, and once settled the rows underneath do — the
++  // header never has to squeeze a compound command into its own label.
++  if (target && category !== 'run') {
+     return `${verb} ${target}`
+   }
+ 
+   return `${verb} ${count} ${copy.noun[count === 1 ? 0 : 1]}`
+ }
+ 
++/** Whether a run holds any shell command, so its header can wear the terminal
++ *  glyph. Mirrors the category routing `clause()` counts with. */
++export function runHasCommand(tools: readonly ToolCallLike[]): boolean {
++  return tools.some(tool => toolCategory(tool.toolName) === 'run')
++}
++
+ function lowerFirst(text: string): string {
+   return text.charAt(0).toLowerCase() + text.slice(1)
+ }
+diff --git a/apps/desktop/src/i18n/ar_assistant.ts b/apps/desktop/src/i18n/ar_assistant.ts
+index 452ce4ee5f..05c03fd4cf 100644
+--- a/apps/desktop/src/i18n/ar_assistant.ts
++++ b/apps/desktop/src/i18n/ar_assistant.ts
+@@ -42,6 +42,7 @@ export const arAssistant = {
+       thought: 'فكّر',
+       thoughtBriefly: 'فكّر قليلاً',
+       thoughtFor: duration => `فكّر لمدة ${duration}`,
++      workedFor: duration => `عمل لمدة ${duration}`,
+       turnDuration: duration => `استغرقت هذه الجولة ${duration}`,
+       today: time => `اليوم ${time}`,
+       yesterday: time => `أمس ${time}`,
+diff --git a/apps/desktop/src/i18n/de.ts b/apps/desktop/src/i18n/de.ts
+index 322cb80c35..c975f3b1a5 100644
+--- a/apps/desktop/src/i18n/de.ts
++++ b/apps/desktop/src/i18n/de.ts
+@@ -4899,6 +4899,7 @@ export const deOverrides = {
+       thought: 'Gedanke',
+       thoughtBriefly: 'Kurz nachgedacht',
+       thoughtFor: duration => `${duration} nachgedacht`,
++      workedFor: duration => `${duration} lang gearbeitet`,
+       turnDuration: duration => `Dieser Turn dauerte ${duration}`,
+       today: time => `Heute, ${time}`,
+       yesterday: time => `Gestern, ${time}`,
+diff --git a/apps/desktop/src/i18n/en.ts b/apps/desktop/src/i18n/en.ts
+index e00f9ff5b4..22e7bb800c 100644
+--- a/apps/desktop/src/i18n/en.ts
++++ b/apps/desktop/src/i18n/en.ts
+@@ -4475,6 +4475,7 @@ export const en: Translations = {
+       thought: 'Thought',
+       thoughtBriefly: 'Thought briefly',
+       thoughtFor: duration => `Thought for ${duration}`,
++      workedFor: duration => `Worked for ${duration}`,
+       turnDuration: duration => `This turn took ${duration}`,
+       today: time => `Today, ${time}`,
+       yesterday: time => `Yesterday, ${time}`,
+diff --git a/apps/desktop/src/i18n/es.ts b/apps/desktop/src/i18n/es.ts
+index 21aa89c792..3b47539866 100644
+--- a/apps/desktop/src/i18n/es.ts
++++ b/apps/desktop/src/i18n/es.ts
+@@ -4885,6 +4885,7 @@ export const esOverrides = {
+       thought: 'Pensamiento',
+       thoughtBriefly: 'Pensó brevemente',
+       thoughtFor: duration => `Pensó durante ${duration}`,
++      workedFor: duration => `Trabajó durante ${duration}`,
+       turnDuration: duration => `Este turno tomó ${duration}`,
+       today: time => `Hoy, ${time}`,
+       yesterday: time => `Ayer, ${time}`,
+diff --git a/apps/desktop/src/i18n/fr.ts b/apps/desktop/src/i18n/fr.ts
+index d88c99a708..790e1d85c6 100644
+--- a/apps/desktop/src/i18n/fr.ts
++++ b/apps/desktop/src/i18n/fr.ts
+@@ -4911,6 +4911,7 @@ export const frOverrides = {
+       thought: 'A réfléchi',
+       thoughtBriefly: 'A réfléchi brièvement',
+       thoughtFor: duration => `A réfléchi pendant ${duration}`,
++      workedFor: duration => `A travaillé pendant ${duration}`,
+       turnDuration: duration => `Ce tour a duré ${duration}`,
+       today: time => `Aujourd'hui, ${time}`,
+       yesterday: time => `Hier, ${time}`,
+diff --git a/apps/desktop/src/i18n/ja.ts b/apps/desktop/src/i18n/ja.ts
+index e9da9f4538..05e92f09ac 100644
+--- a/apps/desktop/src/i18n/ja.ts
++++ b/apps/desktop/src/i18n/ja.ts
+@@ -3337,6 +3337,7 @@ export const jaOverrides = {
+       thought: '思考済み',
+       thoughtBriefly: '少し思考',
+       thoughtFor: duration => `${duration} 思考`,
++      workedFor: duration => `${duration} 作業しました`,
+       turnDuration: duration => `このターンの所要時間: ${duration}`,
+       today: time => `今日 ${time}`,
+       yesterday: time => `昨日 ${time}`,
+diff --git a/apps/desktop/src/i18n/ru.ts b/apps/desktop/src/i18n/ru.ts
+index f9c98bc83e..f3fc25e308 100644
+--- a/apps/desktop/src/i18n/ru.ts
++++ b/apps/desktop/src/i18n/ru.ts
+@@ -3575,6 +3575,7 @@ export const ruOverrides = {
+       thought: 'Помыслил',
+       thoughtBriefly: 'Кратко подумал',
+       thoughtFor: duration => `Думал ${duration}`,
++      workedFor: duration => `Работал ${duration}`,
+       turnDuration: duration => `Этот ход занял ${duration}`,
+       today: time => `Сегодня, ${time}`,
+       yesterday: time => `Вчера, ${time}`,
+diff --git a/apps/desktop/src/i18n/types.ts b/apps/desktop/src/i18n/types.ts
+index c3e58cbd65..df2a615fbd 100644
+--- a/apps/desktop/src/i18n/types.ts
++++ b/apps/desktop/src/i18n/types.ts
+@@ -3929,6 +3929,7 @@ export interface Translations extends NoticeTranslations {
+       thought: string
+       thoughtBriefly: string
+       thoughtFor: (duration: string) => string
++      workedFor: (duration: string) => string
+       turnDuration: (duration: string) => string
+       today: (time: string) => string
+       yesterday: (time: string) => string
+diff --git a/apps/desktop/src/i18n/zh-hant_assistant.ts b/apps/desktop/src/i18n/zh-hant_assistant.ts
+index e4d9216411..ca4d25ac14 100644
+--- a/apps/desktop/src/i18n/zh-hant_assistant.ts
++++ b/apps/desktop/src/i18n/zh-hant_assistant.ts
+@@ -42,6 +42,7 @@ export const zhHantAssistant = {
+       thought: '已思考',
+       thoughtBriefly: '思考了片刻',
+       thoughtFor: duration => `思考了 ${duration}`,
++      workedFor: duration => `用時 ${duration}`,
+       turnDuration: duration => `本輪耗時 ${duration}`,
+       today: time => `今天，${time}`,
+       yesterday: time => `昨天，${time}`,
+diff --git a/apps/desktop/src/i18n/zh.ts b/apps/desktop/src/i18n/zh.ts
+index 4c2f45b8b4..182c60b25f 100644
+--- a/apps/desktop/src/i18n/zh.ts
++++ b/apps/desktop/src/i18n/zh.ts
+@@ -4312,6 +4312,7 @@ export const zhOverrides = {
+       thought: '已思考',
+       thoughtBriefly: '思考了片刻',
+       thoughtFor: duration => `思考了 ${duration}`,
++      workedFor: duration => `用时 ${duration}`,
+       turnDuration: duration => `本轮耗时 ${duration}`,
+       today: time => `今天，${time}`,
+       yesterday: time => `昨天，${time}`,
+diff --git a/apps/desktop/src/lib/chat-runtime.ts b/apps/desktop/src/lib/chat-runtime.ts
+index 6ae1ad770f..310751d2d6 100644
+--- a/apps/desktop/src/lib/chat-runtime.ts
++++ b/apps/desktop/src/lib/chat-runtime.ts
+@@ -425,6 +425,39 @@ export function messageCreatedAt(message: Pick<ChatMessage, 'timestamp'>, nowMs
+     : new Date(nowMs)
+ }
+ 
++/**
++ * Wall-clock seconds a settled assistant turn ran, for turns read back from
++ * history: the live stream stamps `durationS` when the turn completes, and a
++ * hydrated turn has no such stamp. Derived from the parts' own Unix-second
++ * markings — the turn starts at the message stamp and ends at the latest call
++ * completion — so a loaded transcript folds with the same "Worked for …" row
++ * as the live one. Returns undefined when the transcript cannot say.
++ */
++function hydratedTurnDurationS(message: ChatMessage): number | undefined {
++  if (message.role !== 'assistant' || message.pending) {
++    return undefined
++  }
++
++  const start = typeof message.timestamp === 'number' && message.timestamp > 0 ? message.timestamp : undefined
++  let end = typeof message.completedAt === 'number' ? message.completedAt : undefined
++
++  for (const part of message.parts) {
++    const completedAt = (part as { completedAt?: number }).completedAt
++
++    if (typeof completedAt === 'number' && (end === undefined || completedAt > end)) {
++      end = completedAt
++    }
++  }
++
++  if (start === undefined || end === undefined) {
++    return undefined
++  }
++
++  const seconds = Math.round(end - start)
++
++  return seconds >= 1 ? seconds : undefined
++}
++
+ // The safety-refused notice rides metadata.custom on the system row, like
+ // asyncResult — extracted so toRuntimeMessage keeps its complexity in budget.
+ function contentRefusedMeta(
+@@ -438,6 +471,7 @@ export function toRuntimeMessage(message: ChatMessage): ThreadMessage {
+     message.role === 'user' || message.role === 'assistant' || message.role === 'system' ? message.role : 'assistant'
+ 
+   const createdAt = messageCreatedAt(message)
++  const durationS = message.durationS ?? hydratedTurnDurationS(message)
+ 
+   // Reactions and the durable row id ride metadata.custom for every role — the
+   // established channel for per-message extras (attachmentRefs below).
+@@ -502,7 +536,7 @@ export function toRuntimeMessage(message: ChatMessage): ThreadMessage {
+         ...(message.interrupted ? { interrupted: true } : {}),
+         ...timelineMeta,
+         ...(message.completedAt !== undefined ? { timelineCompletedAt: message.completedAt } : {}),
+-        ...(message.durationS !== undefined ? { durationS: message.durationS } : {}),
++        ...(durationS !== undefined ? { durationS } : {}),
+         // Structured failure layer for the error card (see lib/error-surface).
+         ...(message.errorSurface ? { errorSurface: message.errorSurface } : {}),
+         ...reactionMeta
