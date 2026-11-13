@@ -48,6 +48,7 @@ Requires **Node ≥ 26** (the desktop app declares it) and pnpm. The script pins
 | `0004-chrome` | tab strip, surface split, titlebar, minimal bottom bar, menus, 10px overlay cards |
 | `0005-brand` | the draw-on sweep and the mark-only connecting screen |
 | `0006-docs` | the design notes that go with all of the above |
+| `0007-clarify-fold` | a pending question is never folded away with the turn's activity |
 
 ## Honest caveats
 

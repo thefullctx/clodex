@@ -1,0 +1,71 @@
+diff --git a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts
+index fa05ac5e77..6616792d1c 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts
++++ b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from 'vitest'
+ 
+-import { liveActivityLabel } from './turn-collapse'
++import { liveActivityLabel, pendingQuestionIn } from './turn-collapse'
+ 
+ const COPY = { thinking: 'Thinking', thought: 'Thought' }
+ 
+@@ -45,3 +45,19 @@ describe('liveActivityLabel', () => {
+     expect(liveActivityLabel([], COPY)).toBe('')
+   })
+ })
++
++describe('pendingQuestionIn', () => {
++  // The fold must never swallow a question the turn is waiting on: the card
++  // behind it is the only way to answer, and a collapsed row hid it.
++  it('flags an unanswered clarify call', () => {
++    expect(pendingQuestionIn([tool('clarify', { questions: [] })])).toBe(true)
++  })
++
++  it('lets a settled clarify fold with the rest of the turn', () => {
++    expect(pendingQuestionIn([tool('clarify', {}, true)])).toBe(false)
++  })
++
++  it('ignores ordinary tool calls and prose', () => {
++    expect(pendingQuestionIn([tool('terminal', { command: 'ls' }), text()])).toBe(false)
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx
+index 8e290b3c63..68714d46c2 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/turn-collapse.tsx
+@@ -36,6 +36,17 @@ interface LivePart {
+  * "Thought". Returns '' when the tail is prose — the turn is writing, and there
+  * is nothing to narrate.
+  */
++/** A question waiting on the user is never scaffolding: it IS the turn. Folding
++ *  it away hid the card behind the "Asking a question" row, so the question read
++ *  as a collapsed log line and went unanswered. */
++export function pendingQuestionIn(parts: readonly LivePart[]): boolean {
++  return parts.some(part => {
++    const call = part as unknown as ToolCallLike
++
++    return part.type === 'tool-call' && call.toolName === 'clarify' && call.result === undefined
++  })
++}
++
+ export function liveActivityLabel(
+   parts: readonly LivePart[],
+   copy: { thinking: string; thought: string }
+@@ -95,6 +106,7 @@ export function TurnActivityScope({ children, durationS }: { children: ReactNode
+   const hasActivity = useAuiState(s =>
+     s.message.parts.some(part => part.type === 'tool-call' || part.type === 'reasoning')
+   )
++  const pendingQuestion = useAuiState(s => pendingQuestionIn(s.message.parts))
+ 
+   const disclosureId = `turn:${messageId}`
+   const open = useStore($toolDisclosureOpen(disclosureId))
+@@ -110,7 +122,7 @@ export function TurnActivityScope({ children, durationS }: { children: ReactNode
+   }
+ 
+   const showRow = hasActivity && (running ? singleActivityLine : durationS !== undefined)
+-  const fold = showRow && !open
++  const fold = showRow && !open && !pendingQuestion
+   const copy = running
+     ? label || lastLabel.current || t.assistant.thread.thinking
+     : durationS !== undefined
