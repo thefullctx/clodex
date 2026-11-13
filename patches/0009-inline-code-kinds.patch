@@ -1,0 +1,314 @@
+diff --git a/apps/desktop/DESIGN.md b/apps/desktop/DESIGN.md
+index 462bc1dae5..7e1c120d77 100644
+--- a/apps/desktop/DESIGN.md
++++ b/apps/desktop/DESIGN.md
+@@ -466,11 +466,15 @@ from their root base tokens; do not multiply the global tokens or nest CSS zoom.
+   6px reads as a rendering hiccup. `stalled` stays hollow and still on purpose. The row background, border and title
+   stay still, and the motion is the same primitive the pane tabs and the session
+   switcher already render.
+-- **Inline code is a black chip, white type.** Monospace on a solid `#000`
+-  (`#0a0a0a` in light, so it reads as ink rather than a hole on the white page)
+-  with `#fff` type, in both modes and on both sides of the transcript. The
+-  tinted pill read as a highlight; this reads as a literal — the owner's call,
+-  and it also stops inline commands from blending into the prose they sit in.
++- **Inline code is classified, and the chip inverts per mode.** The string alone
++  decides the kind (`src/lib/inline-code.ts`): shell command, filesystem path,
++  model id, token/hash — four hues, each carried by a glyph as much as a colour,
++  so it survives grayscale and colour-blindness. The glyph is a `::before` mask,
++  never a child element: an `<i>` inside a code span rides along into a copy, and
++  inline code exists to be copied. Unclassified spans stay a plain chip — black
++  with white type in light mode, WHITE with dark type in dark mode (the owner's
++  pick: a printed label on a near-black page). Ink is declared per mode; a green
++  that reads on `#191919` is muddy on white.
+ - **No empty-slot reaction affordance.** A message never draws a reaction
+   control on its own: the ☺ appeared the moment the pointer crossed a turn, which
+   read as clutter under the sent bubble. `data-slot="aui_msg-reactions"` renders
+diff --git a/apps/desktop/src/components/assistant-ui/markdown-text.tsx b/apps/desktop/src/components/assistant-ui/markdown-text.tsx
+index 1d1457a647..ea11223169 100644
+--- a/apps/desktop/src/components/assistant-ui/markdown-text.tsx
++++ b/apps/desktop/src/components/assistant-ui/markdown-text.tsx
+@@ -34,6 +34,7 @@ import { useMediaPlaybackSrc } from '@/hooks/use-media-playback-src'
+ import { detectArtifact } from '@/lib/artifact-detect'
+ import { renderMediaTags } from '@/lib/chat-messages/parts'
+ import { ExternalLink, normalizeExternalUrl, openExternalLink, PrettyLink } from '@/lib/external-link'
++import { inlineCodeKind } from '@/lib/inline-code'
+ import { createMemoizedMathPlugin } from '@/lib/katex-memo'
+ import { parseMarkdownIntoBlocksCached } from '@/lib/markdown-blocks'
+ import { preprocessMarkdown } from '@/lib/markdown-preprocess'
+@@ -721,9 +722,18 @@ function MarkdownTextSurface({
+         // mirroring the CSS isolate that already keeps it out of the
+         // plaintext scan. Fenced code never reaches this override; it goes
+         // through the code plugin's CodeCard path.
+-        inlineCode: ({ className, ...props }: ComponentProps<'code'>) => (
+-          <code className={className} dir="ltr" {...props} />
+-        ),
++        inlineCode: ({ className, children, ...props }: ComponentProps<'code'>) => {
++          // Classify the span so a command, a path, a model id and a token read
++          // differently. Only a bare string can be judged — a nested node keeps
++          // the plain chip.
++          const kind = typeof children === 'string' ? inlineCodeKind(children) : null
++
++          return (
++            <code className={className} data-code-kind={kind ?? undefined} dir="ltr" {...props}>
++              {children}
++            </code>
++          )
++        },
+         // `---` as quiet spacing, not a heavy full-width rule.
+         hr: (_props: ComponentProps<'hr'>) => <div aria-hidden className="my-3" />,
+         // Lists and blockquotes have chrome that sits *beside* the text
+diff --git a/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx b/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
+index 851b410294..1543222c92 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
+@@ -3,6 +3,7 @@ import { Fragment, useMemo } from 'react'
+ 
+ import { DirectiveContent } from '@/components/assistant-ui/directive-text'
+ import { referenceRe } from '@/components/assistant-ui/reference-kinds'
++import { inlineCodeKind } from '@/lib/inline-code'
+ import { cn } from '@/lib/utils'
+ import { useForcedTextDirection } from '@/store/text-direction'
+ 
+@@ -160,6 +161,7 @@ const InlineSegmentView: FC<{ text: string }> = ({ text }) => {
+         node.kind === 'inline-code' ? (
+           <code
+             className="mx-px rounded bg-(--ui-inline-code-background) px-1 py-px font-mono text-[0.92em] text-(--ui-inline-code-foreground)"
++            data-code-kind={inlineCodeKind(node.code) ?? undefined}
+             data-slot="aui_user-inline-code"
+             key={`code-${nodeIndex}`}
+           >
+diff --git a/apps/desktop/src/lib/inline-code.test.ts b/apps/desktop/src/lib/inline-code.test.ts
+new file mode 100644
+index 0000000000..3553eed0eb
+--- /dev/null
++++ b/apps/desktop/src/lib/inline-code.test.ts
+@@ -0,0 +1,48 @@
++import { describe, expect, it } from 'vitest'
++
++import { classifyInlineCode } from './inline-code'
++
++describe('classifyInlineCode', () => {
++  it('reads shell commands and leading assignments', () => {
++    for (const text of ['npm run pack', 'git status', 'gh pr create', 'cd apps/desktop', 'ABLIT=1', 'HF_TOKEN=abc']) {
++      expect(classifyInlineCode(text)).toBe('shell')
++    }
++  })
++
++  it('reads runnable script paths as shell, not as files', () => {
++    expect(classifyInlineCode('./start.sh')).toBe('shell')
++    expect(classifyInlineCode('../tools/run.py')).toBe('shell')
++  })
++
++  it('reads filesystem paths', () => {
++    expect(classifyInlineCode('~/Projects/hermes/apps/desktop')).toBe('path')
++    expect(classifyInlineCode('src/app/chat/index.tsx')).toBe('path')
++    expect(classifyInlineCode('/usr/local/bin')).toBe('path')
++    expect(classifyInlineCode('~/bin/run')).toBe('path')
++  })
++
++  it('reads model names and HF cache directories', () => {
++    expect(classifyInlineCode('models--drowzeys--keys--house-qsa-L3-47')).toBe('model')
++    expect(classifyInlineCode('Qwen3.8-Flash-Next')).toBe('model')
++    expect(classifyInlineCode('gpt-4o-mini')).toBe('model')
++  })
++
++  it('reads long ids, hashes and prefixed keys', () => {
++    expect(classifyInlineCode('ablit-b9ce18a6-c44f5b92')).toBe('token')
++    expect(classifyInlineCode('9f2b7c1e4d8a6350')).toBe('token')
++    expect(classifyInlineCode('ghp_1234567890abcdefghij')).toBe('token')
++  })
++
++  // The whole point of a conservative table: ordinary words must stay plain, or
++  // every paragraph turns into confetti.
++  it('leaves prose and bare words plain', () => {
++    for (const text of ['ornith', 'some_value', 'the config', 'true', 'ok', 'Hermes', '2']) {
++      expect(classifyInlineCode(text)).toBe('plain')
++    }
++  })
++
++  it('leaves command flags and short paths with spaces alone', () => {
++    expect(classifyInlineCode('--force')).toBe('plain')
++    expect(classifyInlineCode('a / b')).toBe('plain')
++  })
++})
+diff --git a/apps/desktop/src/lib/inline-code.ts b/apps/desktop/src/lib/inline-code.ts
+new file mode 100644
+index 0000000000..cf39bae790
+--- /dev/null
++++ b/apps/desktop/src/lib/inline-code.ts
+@@ -0,0 +1,86 @@
++/**
++ * What an inline `code` span looks like, decided from the text alone.
++ *
++ * Markdown gives us a bare string — no idea whether it came from a terminal
++ * call, a file listing, or a model id — so this is a heuristic, and it is
++ * deliberately conservative: a wrong guess costs a hue, and every rule below is
++ * anchored so ordinary words stay plain.
++ *
++ * The kind drives colour AND glyph (see styles.css `[data-code-kind]`). The
++ * glyph is a CSS mask on ::before, never a child element: a real <i> inside a
++ * code span would ride along into a copy, and inline code exists to be copied.
++ */
++export type InlineCodeKind = 'shell' | 'model' | 'path' | 'token'
++
++/** Shells and the tools a command starts with. Anchored at the string start. */
++const SHELL_TOOLS =
++  /^(?:sudo\s+)?(?:git|gh|npm|pnpm|yarn|bun|npx|node|cargo|rustc|go|python3?|pip3?|uv|poetry|docker|kubectl|helm|terraform|curl|wget|ssh|scp|rsync|brew|make|just|cmake|systemctl|launchctl|defaults|open|code|vim|nano|tmux|cd|ls|cat|head|tail|grep|rg|sed|awk|chmod|chown|mkdir|rm|cp|mv|ln|touch|tar|zip|unzip|kill|ps|lsof|df|du)\b/
++
++/** A leading assignment: `ABLIT=1`, `HF_TOKEN=…`, `FOO=""`. */
++const ENV_ASSIGN = /^[A-Z][A-Z0-9_]{1,40}=\S*$/
++
++/** A runnable script, written relative: `./start.sh`, `../tools/run.py`. A
++ *  `~/…` spelling is a location, not an instruction — it stays a path. */
++const SCRIPT_PATH = /^\.{1,2}\/\S+$/
++
++/** A Hugging Face cache directory: `models--org--name`. */
++const MODEL_CACHE = /^models--[\w.-]+--[\w.-]+/
++
++/** A versioned model or package name: `Qwen3.8-Flash-Next`, `gpt-4o-mini`. */
++const MODEL_NAME = /^[A-Za-z][A-Za-z0-9.]*(?:-\d[\w.-]*|-[A-Z][\w.-]*){1,4}$/
++
++/** At least one slash and no spaces — a filesystem path, not prose. */
++const FILE_PATH = /^(?:~\/|\/|\.{1,2}\/)?[\w.@+-]+(?:\/[\w.@+-]+)+(?:\.[A-Za-z0-9]{1,8})?\/?$/
++
++/** Long, mixed and hyphenated: ids, hashes, keys. */
++const ID_TOKEN = /^(?:gh[pousr]_|sk-|xox[baprs]-)?[A-Za-z0-9][A-Za-z0-9_-]{17,}$/
++
++const HEX_HASH = /^(?:[0-9a-f]{8,}|[0-9A-F]{8,})$/i
++
++/** Decide one span. Order matters: the specific shapes come before the generic. */
++export function classifyInlineCode(raw: string): InlineCodeKind | 'plain' {
++  const text = raw.trim()
++
++  if (!text || /\s{2,}/.test(text)) {
++    return 'plain'
++  }
++
++  if (MODEL_CACHE.test(text)) {
++    return 'model'
++  }
++
++  if (ENV_ASSIGN.test(text) || SHELL_TOOLS.test(text)) {
++    return 'shell'
++  }
++
++  if (SCRIPT_PATH.test(text)) {
++    return 'shell'
++  }
++
++  // Before paths: a hash never contains a slash, and a path always does.
++  if (HEX_HASH.test(text)) {
++    return 'token'
++  }
++
++  if (FILE_PATH.test(text)) {
++    return 'path'
++  }
++
++  if (MODEL_NAME.test(text) && /\d/.test(text)) {
++    return 'model'
++  }
++
++  // Needs a digit or a separator to be an id — a bare word like `ornith` is prose.
++  if (ID_TOKEN.test(text) && /[\d_-]/.test(text)) {
++    return 'token'
++  }
++
++  return 'plain'
++}
++
++/** Whether a span should carry colour at all. */
++export const inlineCodeKind = (raw: string): InlineCodeKind | null => {
++  const kind = classifyInlineCode(raw)
++
++  return kind === 'plain' ? null : kind
++}
+diff --git a/apps/desktop/src/styles.css b/apps/desktop/src/styles.css
+index 2ffef6b1b6..17ac884714 100644
+--- a/apps/desktop/src/styles.css
++++ b/apps/desktop/src/styles.css
+@@ -627,8 +627,10 @@
+     /* Dark needs a lighter resting border than light mode. */
+     --dt-input-border: 4%;
+ 
+-    --ui-inline-code-background: #000000;
+-    --ui-inline-code-foreground: #ffffff;
++    /* Dark mode inverts: the chip is a light surface with dark type, so a
++       command reads as a printed label on the near-black page. */
++    --ui-inline-code-background: #f1f1f1;
++    --ui-inline-code-foreground: #0d0d0d;
+     --ui-selection-background: color-mix(in srgb, #ffd24a 38%, transparent);
+     /* A dark card sits ABOVE the chrome (#161618 over #0d0d0e), so an inline
+        widget wearing the raw card fill reads as a lit panel. Take it down a
+@@ -2408,6 +2410,71 @@ body.guest-pointer-lock :is(webview, iframe) {
+   color: var(--ui-inline-code-foreground);
+ }
+ 
++/* CLASSIFIED INLINE CODE. The string decides the hue (src/lib/inline-code.ts);
++   the glyph is a ::before mask, never a child element — an <i> inside a code
++   span rides along into a copy, and inline code exists to be copied. Ink is
++   stated per mode: a green that reads on #191919 is muddy on white. */
++:root {
++  --code-shell: #116329;
++  --code-path: #0a58ca;
++  --code-model: #6639ba;
++  --code-token: #7d4e00;
++}
++
++:root.dark {
++  --code-shell: #7ee787;
++  --code-path: #79c0ff;
++  --code-model: #d2a8ff;
++  --code-token: #e3b341;
++}
++
++code[data-code-kind='shell'] {
++  --code-ink: var(--code-shell);
++  --code-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M2 3l5 5-5 5v-1.4L5.6 8 2 4.4V3zm7 9h5v1.4H9V12z'/%3E%3C/svg%3E");
++}
++
++code[data-code-kind='path'] {
++  --code-ink: var(--code-path);
++  --code-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1.5 3h4.2l1.4 1.6h7.4v8.9H1.5V3zm1.3 1.3v7.9h10.9V5.9H6.5L5.1 4.3H2.8z'/%3E%3C/svg%3E");
++}
++
++code[data-code-kind='model'] {
++  --code-ink: var(--code-model);
++  --code-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M8 1l6 3.5v7L8 15 2 11.5v-7L8 1zm0 1.6L3.6 5 8 7.4 12.4 5 8 2.6zM3.2 6.2v4.6L7.4 13V8.5L3.2 6.2zm9.6 0l-4.2 2.3V13l4.2-2.2V6.2z'/%3E%3C/svg%3E");
++}
++
++code[data-code-kind='token'] {
++  --code-ink: var(--code-token);
++  --code-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M9.5 1a5.5 5.5 0 0 0-5.2 7.3L1 11.6V15h3.4l3.3-3.3A5.5 5.5 0 1 0 9.5 1zm1.6 4.6a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6z'/%3E%3C/svg%3E");
++}
++
++.aui-md :not(pre) > code[data-code-kind],
++[data-slot='aui_user-inline-code'][data-code-kind] {
++  background: color-mix(in srgb, var(--code-ink) 12%, transparent);
++  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--code-ink) 34%, transparent);
++  color: var(--code-ink);
++}
++
++.aui-md :not(pre) > code[data-code-kind]::before,
++[data-slot='aui_user-inline-code'][data-code-kind]::before {
++  background-color: currentColor;
++  content: '';
++  display: inline-block;
++  height: 0.72em;
++  margin-right: 0.3em;
++  mask-image: var(--code-glyph);
++  mask-position: center;
++  mask-repeat: no-repeat;
++  mask-size: contain;
++  opacity: 0.9;
++  vertical-align: -0.05em;
++  width: 0.72em;
++  -webkit-mask-image: var(--code-glyph);
++  -webkit-mask-position: center;
++  -webkit-mask-repeat: no-repeat;
++  -webkit-mask-size: contain;
++}
++
+ [data-slot='aui_assistant-message-content'] .aui-md :where(.aui-shiki, .aui-shiki > pre) {
+   margin: 0 !important;
+ }

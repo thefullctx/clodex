@@ -18,7 +18,7 @@ A look for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s deskto
 
 **Menus.** Every floating list — dropdowns, selects, popovers, right-click menus — at 10px, rows at 6px, so highlights nest.
 
-**Inline code.** Monospace on solid black with white type, both modes: a command reads as a literal, not a grey highlight.
+**Inline code.** Classified from the text itself: shell commands, paths, model ids and tokens each get a hue and a glyph, unclassified spans stay a plain chip that inverts with the mode (black on light, white on dark). A command reads as a literal, not a grey highlight.
 
 ## Two ways to use it
 
@@ -51,7 +51,8 @@ Requires **Node ≥ 26** (the desktop app declares it) and pnpm. The script pins
 | `0005-brand` | the draw-on sweep and the mark-only connecting screen |
 | `0006-docs` | the design notes that go with all of the above |
 | `0007-clarify-fold` | a pending question is never folded away with the turn's activity |
-| `0008-inline-code` | inline code is a black chip with white type, both sides of the transcript |
+| `0008-inline-code` | inline code is a solid chip: black/white in light, white/black in dark |
+| `0009-inline-code-kinds` | the chip is classified — shell, path, model, token, each with a glyph |
 
 ## Honest caveats
 
