@@ -18,7 +18,7 @@ A look for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s deskto
 
 **Menus.** Every floating list — dropdowns, selects, popovers, right-click menus — at 10px, rows at 6px, so highlights nest.
 
-**Inline code.** Classified from the text itself: shell commands, paths, model ids and tokens each get a hue and a glyph, unclassified spans stay a plain chip that inverts with the mode (black on light, white on dark). A command reads as a literal, not a grey highlight.
+**Inline code.** One chip, inverted per mode — black with white type on light, white with black type on dark — set in bundled **IBM Plex Mono**. A command reads as a printed label, not a grey highlight. (An earlier revision colour-coded chips by kind; it read as confetti in real paragraphs and was removed.)
 
 ## Two ways to use it
 
@@ -52,7 +52,8 @@ Requires **Node ≥ 26** (the desktop app declares it) and pnpm. The script pins
 | `0006-docs` | the design notes that go with all of the above |
 | `0007-clarify-fold` | a pending question is never folded away with the turn's activity |
 | `0008-inline-code` | inline code is a solid chip: black/white in light, white/black in dark |
-| `0009-inline-code-kinds` | the chip is classified — shell, path, model, token, each with a glyph |
+| `0009-inline-code-kinds` | (superseded by 0010) classified chips — shell, path, model, token |
+| `0010-plex-mono-chips` | one monochrome chip that inverts per mode, in bundled IBM Plex Mono |
 
 ## Honest caveats
 
