@@ -18,6 +18,8 @@ A look for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s deskto
 
 **Menus.** Every floating list — dropdowns, selects, popovers, right-click menus — at 10px, rows at 6px, so highlights nest.
 
+**Inline code.** Monospace on solid black with white type, both modes: a command reads as a literal, not a grey highlight.
+
 ## Two ways to use it
 
 ### 1. Colours only — no build (~2 minutes)
@@ -49,6 +51,7 @@ Requires **Node ≥ 26** (the desktop app declares it) and pnpm. The script pins
 | `0005-brand` | the draw-on sweep and the mark-only connecting screen |
 | `0006-docs` | the design notes that go with all of the above |
 | `0007-clarify-fold` | a pending question is never folded away with the turn's activity |
+| `0008-inline-code` | inline code is a black chip with white type, both sides of the transcript |
 
 ## Honest caveats
 

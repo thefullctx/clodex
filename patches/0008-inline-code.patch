@@ -1,0 +1,57 @@
+diff --git a/apps/desktop/DESIGN.md b/apps/desktop/DESIGN.md
+index 13340f778f..462bc1dae5 100644
+--- a/apps/desktop/DESIGN.md
++++ b/apps/desktop/DESIGN.md
+@@ -466,6 +466,11 @@ from their root base tokens; do not multiply the global tokens or nest CSS zoom.
+   6px reads as a rendering hiccup. `stalled` stays hollow and still on purpose. The row background, border and title
+   stay still, and the motion is the same primitive the pane tabs and the session
+   switcher already render.
++- **Inline code is a black chip, white type.** Monospace on a solid `#000`
++  (`#0a0a0a` in light, so it reads as ink rather than a hole on the white page)
++  with `#fff` type, in both modes and on both sides of the transcript. The
++  tinted pill read as a highlight; this reads as a literal — the owner's call,
++  and it also stops inline commands from blending into the prose they sit in.
+ - **No empty-slot reaction affordance.** A message never draws a reaction
+   control on its own: the ☺ appeared the moment the pointer crossed a turn, which
+   read as clutter under the sent bubble. `data-slot="aui_msg-reactions"` renders
+diff --git a/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx b/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
+index cc6b4b4d1c..851b410294 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/user-message-text.tsx
+@@ -159,7 +159,7 @@ const InlineSegmentView: FC<{ text: string }> = ({ text }) => {
+       {nodes.map((node, nodeIndex) =>
+         node.kind === 'inline-code' ? (
+           <code
+-            className="mx-px rounded bg-[color-mix(in_srgb,currentColor_8%,transparent)] px-1 py-px font-mono text-[0.92em]"
++            className="mx-px rounded bg-(--ui-inline-code-background) px-1 py-px font-mono text-[0.92em] text-(--ui-inline-code-foreground)"
+             data-slot="aui_user-inline-code"
+             key={`code-${nodeIndex}`}
+           >
+diff --git a/apps/desktop/src/styles.css b/apps/desktop/src/styles.css
+index 5f03a87a94..2ffef6b1b6 100644
+--- a/apps/desktop/src/styles.css
++++ b/apps/desktop/src/styles.css
+@@ -414,8 +414,10 @@
+       var(--theme-neutral-card)
+     );
+     --ui-chat-bubble-opaque-background: var(--ui-bg-editor);
+-    --ui-inline-code-background: color-mix(in srgb, #141414 5%, transparent);
+-    --ui-inline-code-foreground: color-mix(in srgb, #141414 88%, transparent);
++    /* Monochrome: a solid black chip with white type, in BOTH modes. Owner's
++       pick — the tinted pill read as a highlight, this reads as a literal. */
++    --ui-inline-code-background: #0a0a0a;
++    --ui-inline-code-foreground: #ffffff;
+     --ui-selection-background: color-mix(in srgb, #ffd24a 55%, transparent);
+ 
+     --dt-background: var(--ui-bg-chrome);
+@@ -625,8 +627,8 @@
+     /* Dark needs a lighter resting border than light mode. */
+     --dt-input-border: 4%;
+ 
+-    --ui-inline-code-background: color-mix(in srgb, #ffffff 7%, transparent);
+-    --ui-inline-code-foreground: color-mix(in srgb, #ffffff 88%, transparent);
++    --ui-inline-code-background: #000000;
++    --ui-inline-code-foreground: #ffffff;
+     --ui-selection-background: color-mix(in srgb, #ffd24a 38%, transparent);
+     /* A dark card sits ABOVE the chrome (#161618 over #0d0d0e), so an inline
+        widget wearing the raw card fill reads as a lit panel. Take it down a
